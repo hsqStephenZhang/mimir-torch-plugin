@@ -20,7 +20,7 @@ lam extern dynamic_check {n m: Nat}(): Bool =
 // CHECK: tt
 
 // One symbolic guard remains, while the statically true guard is eliminated.
-// PROFILE: Phase counters:
+// PROFILE: Profile (flat):
 // PROFILE-DAG: 2 %torch.lower_torch: decompose.impl
 // PROFILE-DAG: 1 %torch.lower_torch: constraints.dynamic_residual
 lam extern static_success(): Bool =

@@ -31,7 +31,7 @@ fun extern convolution3d_grouped(
         ((2, 2, 2), (1, 0, 2), (1, 2, 1), ff, (0, 0, 0), 2)
         (input, weight, %option.some bias));
 
-// PROFILE: Phase counters:
+// PROFILE: Profile (flat):
 // PROFILE-DAG: 1 %torch.lower_torch: decompose.impl.%torch.conv.conv3d
 lam extern _compile (): %compile.Phase =
     %compile.phases ff (

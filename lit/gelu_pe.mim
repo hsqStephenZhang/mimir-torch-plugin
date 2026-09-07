@@ -21,7 +21,7 @@ fun extern gelu_tanh(input: «2, 4; %math.F32»): «2, 4; %math.F32» =
 // CHECK: %math.tri.
 // CHECK-NOT: %math.er.f
 
-// PROFILE: Phase counters:
+// PROFILE: Profile (flat):
 // PROFILE-DAG: 2 %torch.lower_torch: decompose.impl.%torch.activation.gelu
 lam extern _compile (): %compile.Phase =
     %compile.phases ff (

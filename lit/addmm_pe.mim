@@ -40,7 +40,7 @@ fun extern addmm_with_self(
     return (%torch.linalg.addmm NatArithmetic
         @(1, 2, 3, 4) ((2,), (0_2,)) (self, mat1, mat2) (1, 1));
 
-// PROFILE: Phase counters:
+// PROFILE: Profile (flat):
 // PROFILE-DAG: 2 %torch.lower_torch: decompose.impl
 // PROFILE-DAG: 2 %torch.lower_torch: decompose.impl.%torch.linalg.addmm
 

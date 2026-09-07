@@ -31,7 +31,7 @@ fun extern convolution1d_stride(
         (2, 1, 1, ff, 0, 1)
         (input, weight, %option.some bias));
 
-// PROFILE: Phase counters:
+// PROFILE: Profile (flat):
 // PROFILE-DAG: 1 %torch.lower_torch: decompose.impl.%torch.conv.conv1d
 lam extern _compile (): %compile.Phase =
     %compile.phases ff (

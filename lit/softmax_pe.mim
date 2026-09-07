@@ -64,7 +64,7 @@ fun extern softmax_dynamic_dim(dimension: I64, input: «2, 4; Nat»): «2, 4; Na
 // CHECK: let maximum_
 // CHECK-NOT: log_denominator_
 
-// PROFILE: Phase counters:
+// PROFILE: Profile (flat):
 // PROFILE-DAG: 3 %torch.lower_torch: decompose.impl.%torch.normalization.softmax
 // PROFILE-DAG: 1 %torch.lower_torch: decompose.impl.%torch.normalization.log_softmax
 // PROFILE-DAG: 1 %torch.lower_torch: constraints.dynamic_residual

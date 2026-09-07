@@ -25,7 +25,7 @@ lam extern triangular_dynamic {r: Nat, s: «r; Nat»}
 // CHECK-NOT: %runtime.static_check
 // CHECK-COUNT-2: %tensor.generate
 
-// PROFILE: Phase counters:
+// PROFILE: Profile (flat):
 // PROFILE-DAG: 3 %torch.lower_torch: decompose.impl
 // PROFILE-DAG: 2 %torch.lower_torch: decompose.impl.%torch.linalg.triu
 // PROFILE-DAG: 1 %torch.lower_torch: decompose.impl.%torch.linalg.tril

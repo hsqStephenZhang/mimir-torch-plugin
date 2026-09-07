@@ -6,8 +6,8 @@ plugin compile;
 
 // CHECK-LABEL: fun extern avg_pool3d
 // CHECK: %tensor.pad
-// CHECK: %tensor.map_reduce
-// CHECK: %tensor.map_reduce 2
+// CHECK: %tensor.map_reduce_post
+// CHECK: %tensor.map_reduce_post
 // CHECK-SAME: %tensor.generate
 fun extern avg_pool3d(input: «2, 3, 5, 7, 9; %math.F32»)
                     : «2, 3, 3, 4, 5; %math.F32» =
