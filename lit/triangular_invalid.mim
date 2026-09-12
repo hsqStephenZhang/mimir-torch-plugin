@@ -3,9 +3,9 @@
 plugin torch;
 plugin compile;
 
-lam extern invalid_rank(input: «4; I32»): «4; I32» =
-    %torch.linalg.triu @(I32, 1, (4,)) (0I32, 0I64) input;
+extern lam invalid_rank(input: «4; I32»): «4; I32» =
+    torch.linalg.triu @(I32, 1, (4,)) (0I32, 0I64) input;
 
-lam extern _compile (): %compile.Phase = %torch.lower_torch;
+extern lam _compile (): compile.Phase = torch.lower_torch;
 
 // CHECK: error: static runtime assertion failed: triu expects rank >= 2
