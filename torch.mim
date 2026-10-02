@@ -84,6 +84,31 @@ anx let Reduction = [
     cast: Input → Output,
 ];
 
+/// Shape and element helpers that `tensor` keeps private to its own module.
+lam torch_pad_shape {r: Nat} (lo s_in hi: «r; Nat»): «r; Nat» =
+    ‹d: r; lo#d + s_in#d + hi#d›;
+
+lam torch_transpose_shape {r: Nat} (s: «r; Nat», permutation: «r; Idx r»): «r; Nat» =
+    let shape_permutation = ‹i: r; option.unwrap_unsafe (vec.first core.icmp.e (permutation, i))›;
+    ‹i: r; s#(shape_permutation#i)›;
+
+lam torch_concat_acc {r: Nat} (ax: Idx r) (acc: Nat, row: «r; Nat»): Nat = acc + row#ax;
+
+lam torch_concat_shape {nis r: Nat} (ax: Idx r, Sis: «nis; «r; Nat»»): «r; Nat» =
+    let sum_ax = vec.fold.l (torch_concat_acc ax) (0, Sis);
+    let row_0  = Sis#(core.idx 0 nis 0);
+    ‹d: r; core.select (core.icmp.e (d, ax), sum_ax, row_0#d)›;
+
+fun torch_tensor_copy {T: *} (acc: T, y: T)@tt: T = return y;
+
+fun torch_conv_fun (R: tensor.Ring) (acc: R#T, ab: «2; R#T»)@tt: R#T =
+    return (R#add (acc, R#mul (ab#0_2, ab#1_2)));
+
+lam torch_pool2d_in_map (stride dilation: «2; Nat») (o: «6; affine.Index»): «4; affine.Index» =
+    (o#0_6, o#1_6,
+     affine.op.add (affine.semiop.mul (o#2_6, stride#0_2), affine.semiop.mul (o#4_6, dilation#0_2)),
+     affine.op.add (affine.semiop.mul (o#3_6, stride#1_2), affine.semiop.mul (o#5_6, dilation#1_2)));
+
 lam torch_identity {T: *} (x: T): T = x;
 lam torch_reduction_i64_add (args: [I64, I64]): I64 = core.wrap.add 0 args;
 lam torch_reduction_bool_to_i64 (x: Bool): I64 =
@@ -590,7 +615,7 @@ lam torch_reduce_shape {r: Nat}
     ‹i: r - 1; s#(torch_kept_dim @r (dimension, i))›;
 
 /// MimIR lowering: materializes the kept-axis list consumed by
-/// `tensor.broadcast_in_dim_impl` and projection maps.
+/// `tensor.broadcast_in_dim` and projection maps.
 /// Python: `return [d for d in range(rank) if d != dimension]`.
 lam torch_kept_dims {r: Nat}
                     (dimension: Idx r): «r - 1; Idx r» =
@@ -637,14 +662,14 @@ lam torch_pairwise_distance_2d (F: Floating)
                                 (eps p: F#A#R#T)
                                 (lhs rhs: «n, d; F#A#R#T»)
                               : «n; F#A#R#T» =
-    let powers = tensor.binary_impl
+    let powers = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         (torch_pairwise_power_scalar F (eps, p))
         @(2, (n, d)) (lhs, rhs);
     let sums = torch_reduce_dim
         (F#A#R#add, F#A#R#_0) ((n, d), 1_2) powers;
     let reciprocal_p = F#A#div (F#from_nat 1, p);
-    let powered = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let powered = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_pow_scalar F reciprocal_p) @(1, (n,)) sums;
     core.select @«n; F#A#R#T» (F#A#is_zero p, sums, powered);
 
@@ -658,7 +683,7 @@ lam torch_broadcast_reduced {T: *, r: Nat}
     let ro = r - 1;
     let s_in = torch_reduce_shape (s, dimension);
     let dims = torch_kept_dims @r dimension;
-    tensor.broadcast_in_dim_impl @(T, ro, r) (s_in, s, input, dims);
+    tensor.broadcast_in_dim @(T, ro, r) (s_in, s, input, dims);
 
 /// Python: `return shape[:dimension] + [1] + shape[dimension + 1:]`.
 lam torch_keepdim_shape {r: Nat}
@@ -738,7 +763,7 @@ lam torch_apply_keepdim {T: *, r nr: Nat}
                         (s: «r; Nat», dimensions: «nr; Idx r», keepdim: Bool)
                         (reduced: «torch_multi_reduce_shape (s, dimensions); T»)
                       =
-    let kept = tensor.reshape_impl
+    let kept = tensor.reshape
         @(T, torch_reduced_rank dimensions, r)
         (torch_multi_reduce_shape (s, dimensions))
         (torch_multi_keepdim_shape (s, dimensions))
@@ -979,81 +1004,81 @@ anx lam add (A: Arithmetic)
                        {r: Nat, s: «r; Nat»}
                        (lhs: «s; A#R#T», rhs: «s; A#R#T»,
                         alpha: A#R#T): «s; A#R#T» =
-    let scaled_rhs = tensor.unary_impl @(A#R#T, A#R#T)
+    let scaled_rhs = tensor.unary @(A#R#T, A#R#T)
         (torch_scale_scalar A alpha) @(r, s) rhs;
-    tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+    tensor.binary @(A#R#T, A#R#T, A#R#T)
         A#R#add @(r, s) (lhs, scaled_rhs);
 
 anx lam sub (A: Arithmetic)
                        {r: Nat, s: «r; Nat»}
                        (lhs: «s; A#R#T», rhs: «s; A#R#T»,
                         alpha: A#R#T): «s; A#R#T» =
-    let scaled_rhs = tensor.unary_impl @(A#R#T, A#R#T)
+    let scaled_rhs = tensor.unary @(A#R#T, A#R#T)
         (torch_scale_scalar A alpha) @(r, s) rhs;
-    tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+    tensor.binary @(A#R#T, A#R#T, A#R#T)
         A#sub @(r, s) (lhs, scaled_rhs);
 
 anx lam mul (A: Arithmetic)
                        {r: Nat, s: «r; Nat»}
                        (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; A#R#T» =
-    tensor.binary_impl @(A#R#T, A#R#T, A#R#T) A#R#mul @(r, s) (lhs, rhs);
+    tensor.binary @(A#R#T, A#R#T, A#R#T) A#R#mul @(r, s) (lhs, rhs);
 
 anx lam div (A: Arithmetic)
                        {r: Nat, s: «r; Nat»}
                        (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; A#R#T» =
-    tensor.binary_impl @(A#R#T, A#R#T, A#R#T) A#div @(r, s) (lhs, rhs);
+    tensor.binary @(A#R#T, A#R#T, A#R#T) A#div @(r, s) (lhs, rhs);
 
 anx lam add_scalar (A: Arithmetic)
                               {r: Nat, s: «r; Nat»}
                               (input: «s; A#R#T», other alpha: A#R#T): «s; A#R#T» =
     let scaled_other = A#R#mul (other, alpha);
-    tensor.unary_impl @(A#R#T, A#R#T)
+    tensor.unary @(A#R#T, A#R#T)
         (torch_add_scalar A scaled_other) @(r, s) input;
 
 anx lam add_i64_scalar {r: Nat, s: «r; Nat»}
                                   (input: «s; I64», other alpha: I64): «s; I64» =
     let scaled_other = core.wrap.mul 0 (other, alpha);
-    tensor.unary_impl @(I64, I64)
+    tensor.unary @(I64, I64)
         (torch_add_i64_scalar scaled_other) @(r, s) input;
 
 anx lam sub_scalar (A: Arithmetic)
                               {r: Nat, s: «r; Nat»}
                               (input: «s; A#R#T», other alpha: A#R#T): «s; A#R#T» =
     let scaled_other = A#R#mul (other, alpha);
-    tensor.unary_impl @(A#R#T, A#R#T)
+    tensor.unary @(A#R#T, A#R#T)
         (torch_sub_scalar A scaled_other) @(r, s) input;
 
 anx lam add_scalar_lhs (A: Arithmetic)
                                   {r: Nat, s: «r; Nat»}
                                   (self: A#R#T, other: «s; A#R#T»,
                                    alpha: A#R#T): «s; A#R#T» =
-    tensor.unary_impl @(A#R#T, A#R#T)
+    tensor.unary @(A#R#T, A#R#T)
         (torch_add_scalar_lhs A (self, alpha)) @(r, s) other;
 
 anx lam sub_scalar_lhs (A: Arithmetic)
                                   {r: Nat, s: «r; Nat»}
                                   (self: A#R#T, other: «s; A#R#T»,
                                    alpha: A#R#T): «s; A#R#T» =
-    tensor.unary_impl @(A#R#T, A#R#T)
+    tensor.unary @(A#R#T, A#R#T)
         (torch_sub_scalar_lhs A (self, alpha)) @(r, s) other;
 
 anx lam sub_i64_scalar {r: Nat, s: «r; Nat»}
                                   (input: «s; I64», other alpha: I64): «s; I64» =
     let scaled_other = core.wrap.mul 0 (other, alpha);
-    tensor.unary_impl @(I64, I64)
+    tensor.unary @(I64, I64)
         (torch_sub_i64_scalar scaled_other) @(r, s) input;
 
 anx lam mul_scalar (A: Arithmetic)
                               {r: Nat, s: «r; Nat»}
                               (input: «s; A#R#T», other: A#R#T): «s; A#R#T» =
-    tensor.unary_impl @(A#R#T, A#R#T)
+    tensor.unary @(A#R#T, A#R#T)
         (torch_scale_scalar A other) @(r, s) input;
 
 anx lam pow_tensor_scalar (F: Floating)
                                      {r: Nat, s: «r; Nat»}
                                      (input: «s; F#A#R#T»,
                                       exponent: F#A#R#T): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_pow_scalar F exponent) @(r, s) input;
 
 anx lam addcmul (A: Arithmetic)
@@ -1072,17 +1097,17 @@ anx lam addcmul (A: Arithmetic)
     runtime.require (valid, "addcmul operands are not broadcastable") body
     where
         lam body(): «so; A#R#T» =
-            let self_b = tensor.broadcast_in_dim_impl @(A#R#T, rs, ro)
+            let self_b = tensor.broadcast_in_dim @(A#R#T, rs, ro)
                 (ss, so, self, ds);
-            let tensor1_b = tensor.broadcast_in_dim_impl @(A#R#T, r1, ro)
+            let tensor1_b = tensor.broadcast_in_dim @(A#R#T, r1, ro)
                 (s1, so, tensor1, d1);
-            let tensor2_b = tensor.broadcast_in_dim_impl @(A#R#T, r2, ro)
+            let tensor2_b = tensor.broadcast_in_dim @(A#R#T, r2, ro)
                 (s2, so, tensor2, d2);
-            let product = tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            let product = tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#R#mul @(ro, so) (tensor1_b, tensor2_b);
-            let scaled = tensor.unary_impl @(A#R#T, A#R#T)
+            let scaled = tensor.unary @(A#R#T, A#R#T)
                 (torch_scale_scalar A value) @(ro, so) product;
-            tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#R#add @(ro, so) (self_b, scaled);
     end;
 
@@ -1102,29 +1127,29 @@ anx lam addcdiv (A: Arithmetic)
     runtime.require (valid, "addcdiv operands are not broadcastable") body
     where
         lam body(): «so; A#R#T» =
-            let self_b = tensor.broadcast_in_dim_impl @(A#R#T, rs, ro)
+            let self_b = tensor.broadcast_in_dim @(A#R#T, rs, ro)
                 (ss, so, self, ds);
-            let tensor1_b = tensor.broadcast_in_dim_impl @(A#R#T, r1, ro)
+            let tensor1_b = tensor.broadcast_in_dim @(A#R#T, r1, ro)
                 (s1, so, tensor1, d1);
-            let tensor2_b = tensor.broadcast_in_dim_impl @(A#R#T, r2, ro)
+            let tensor2_b = tensor.broadcast_in_dim @(A#R#T, r2, ro)
                 (s2, so, tensor2, d2);
-            let quotient = tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            let quotient = tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#div @(ro, so) (tensor1_b, tensor2_b);
-            let scaled = tensor.unary_impl @(A#R#T, A#R#T)
+            let scaled = tensor.unary @(A#R#T, A#R#T)
                 (torch_scale_scalar A value) @(ro, so) quotient;
-            tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#R#add @(ro, so) (self_b, scaled);
     end;
 
 anx lam maximum (A: Arithmetic)
                            {r: Nat, s: «r; Nat»}
                            (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; A#R#T» =
-    tensor.binary_impl @(A#R#T, A#R#T, A#R#T) A#maximum @(r, s) (lhs, rhs);
+    tensor.binary @(A#R#T, A#R#T, A#R#T) A#maximum @(r, s) (lhs, rhs);
 
 anx lam minimum (A: Arithmetic)
                            {r: Nat, s: «r; Nat»}
                            (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; A#R#T» =
-    tensor.binary_impl @(A#R#T, A#R#T, A#R#T) A#minimum @(r, s) (lhs, rhs);
+    tensor.binary @(A#R#T, A#R#T, A#R#T) A#minimum @(r, s) (lhs, rhs);
 
 }
 pub mod comparison {
@@ -1212,92 +1237,92 @@ axm ge: [A: Arithmetic] → {r: Nat, s: «r; Nat»}
 pub mod comparison_impl {
 anx lam ne_i64_scalar {r: Nat, s: «r; Nat»}
                                  (input: «s; I64», other: I64): «s; Bool» =
-    tensor.unary_impl @(I64, Bool)
+    tensor.unary @(I64, Bool)
         (torch_ne_i64_scalar other) @(r, s) input;
 
 anx lam eq_i64_scalar {r: Nat, s: «r; Nat»}
                                  (input: «s; I64», other: I64): «s; Bool» =
-    tensor.unary_impl @(I64, Bool)
+    tensor.unary @(I64, Bool)
         (torch_eq_i64_scalar other) @(r, s) input;
 
 anx lam lt_i64_scalar {r: Nat, s: «r; Nat»}
                                  (input: «s; I64», other: I64): «s; Bool» =
-    tensor.unary_impl @(I64, Bool)
+    tensor.unary @(I64, Bool)
         (torch_lt_i64_scalar other) @(r, s) input;
 
 anx lam le_i64_scalar {r: Nat, s: «r; Nat»}
                                  (input: «s; I64», other: I64): «s; Bool» =
-    tensor.unary_impl @(I64, Bool)
+    tensor.unary @(I64, Bool)
         (torch_le_i64_scalar other) @(r, s) input;
 
 anx lam gt_i64_scalar {r: Nat, s: «r; Nat»}
                                  (input: «s; I64», other: I64): «s; Bool» =
-    tensor.unary_impl @(I64, Bool)
+    tensor.unary @(I64, Bool)
         (torch_gt_i64_scalar other) @(r, s) input;
 
 anx lam ge_i64_scalar {r: Nat, s: «r; Nat»}
                                  (input: «s; I64», other: I64): «s; Bool» =
-    tensor.unary_impl @(I64, Bool)
+    tensor.unary @(I64, Bool)
         (torch_ge_i64_scalar other) @(r, s) input;
 
 anx lam eq_i64 {r: Nat, s: «r; Nat»}
                          (lhs: «s; I64», rhs: «s; I64»): «s; Bool» =
-    tensor.binary_impl @(I64, I64, Bool)
+    tensor.binary @(I64, I64, Bool)
         torch_eq_i64 @(r, s) (lhs, rhs);
 
 anx lam ne_i64 {r: Nat, s: «r; Nat»}
                          (lhs: «s; I64», rhs: «s; I64»): «s; Bool» =
-    tensor.binary_impl @(I64, I64, Bool)
+    tensor.binary @(I64, I64, Bool)
         torch_ne_i64 @(r, s) (lhs, rhs);
 
 anx lam lt_i64 {r: Nat, s: «r; Nat»}
                          (lhs: «s; I64», rhs: «s; I64»): «s; Bool» =
-    tensor.binary_impl @(I64, I64, Bool)
+    tensor.binary @(I64, I64, Bool)
         torch_lt_i64 @(r, s) (lhs, rhs);
 
 anx lam le_i64 {r: Nat, s: «r; Nat»}
                          (lhs: «s; I64», rhs: «s; I64»): «s; Bool» =
-    tensor.binary_impl @(I64, I64, Bool)
+    tensor.binary @(I64, I64, Bool)
         torch_le_i64 @(r, s) (lhs, rhs);
 
 anx lam gt_i64 {r: Nat, s: «r; Nat»}
                          (lhs: «s; I64», rhs: «s; I64»): «s; Bool» =
-    tensor.binary_impl @(I64, I64, Bool)
+    tensor.binary @(I64, I64, Bool)
         torch_gt_i64 @(r, s) (lhs, rhs);
 
 anx lam ge_i64 {r: Nat, s: «r; Nat»}
                          (lhs: «s; I64», rhs: «s; I64»): «s; Bool» =
-    tensor.binary_impl @(I64, I64, Bool)
+    tensor.binary @(I64, I64, Bool)
         torch_ge_i64 @(r, s) (lhs, rhs);
 
 anx lam eq (A: Arithmetic) {r: Nat, s: «r; Nat»}
                       (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; Bool» =
-    tensor.binary_impl @(A#R#T, A#R#T, Bool)
+    tensor.binary @(A#R#T, A#R#T, Bool)
         (torch_compare_scalar A A#eq) @(r, s) (lhs, rhs);
 
 anx lam ne (A: Arithmetic) {r: Nat, s: «r; Nat»}
                       (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; Bool» =
-    tensor.binary_impl @(A#R#T, A#R#T, Bool)
+    tensor.binary @(A#R#T, A#R#T, Bool)
         (torch_compare_scalar A A#ne) @(r, s) (lhs, rhs);
 
 anx lam lt (A: Arithmetic) {r: Nat, s: «r; Nat»}
                       (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; Bool» =
-    tensor.binary_impl @(A#R#T, A#R#T, Bool)
+    tensor.binary @(A#R#T, A#R#T, Bool)
         (torch_compare_scalar A A#lt) @(r, s) (lhs, rhs);
 
 anx lam le (A: Arithmetic) {r: Nat, s: «r; Nat»}
                       (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; Bool» =
-    tensor.binary_impl @(A#R#T, A#R#T, Bool)
+    tensor.binary @(A#R#T, A#R#T, Bool)
         (torch_compare_scalar A A#le) @(r, s) (lhs, rhs);
 
 anx lam gt (A: Arithmetic) {r: Nat, s: «r; Nat»}
                       (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; Bool» =
-    tensor.binary_impl @(A#R#T, A#R#T, Bool)
+    tensor.binary @(A#R#T, A#R#T, Bool)
         (torch_compare_scalar A A#gt) @(r, s) (lhs, rhs);
 
 anx lam ge (A: Arithmetic) {r: Nat, s: «r; Nat»}
                       (lhs: «s; A#R#T», rhs: «s; A#R#T»): «s; Bool» =
-    tensor.binary_impl @(A#R#T, A#R#T, Bool)
+    tensor.binary @(A#R#T, A#R#T, Bool)
         (torch_compare_scalar A A#ge) @(r, s) (lhs, rhs);
 
 }
@@ -1422,39 +1447,39 @@ axm reciprocal: [F: Floating] → {r: Nat, s: «r; Nat»}
 pub mod unary_impl {
 anx lam neg (A: Arithmetic) {r: Nat, s: «r; Nat»}
                        (input: «s; A#R#T»): «s; A#R#T» =
-    tensor.unary_impl @(A#R#T, A#R#T) (torch_neg_scalar A) @(r, s) input;
+    tensor.unary @(A#R#T, A#R#T) (torch_neg_scalar A) @(r, s) input;
 
 anx lam abs (A: Arithmetic) {r: Nat, s: «r; Nat»}
                        (input: «s; A#R#T»): «s; A#R#T» =
-    tensor.unary_impl @(A#R#T, A#R#T) (torch_abs_scalar A) @(r, s) input;
+    tensor.unary @(A#R#T, A#R#T) (torch_abs_scalar A) @(r, s) input;
 
 anx lam exp (F: Floating) {r: Nat, s: «r; Nat»}
                        (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T) (torch_exp_scalar F) @(r, s) input;
+    tensor.unary @(F#A#R#T, F#A#R#T) (torch_exp_scalar F) @(r, s) input;
 
 anx lam log (F: Floating) {r: Nat, s: «r; Nat»}
                        (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T) (torch_log_scalar F) @(r, s) input;
+    tensor.unary @(F#A#R#T, F#A#R#T) (torch_log_scalar F) @(r, s) input;
 
 anx lam sqrt (F: Floating) {r: Nat, s: «r; Nat»}
                         (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T) (torch_sqrt_scalar F) @(r, s) input;
+    tensor.unary @(F#A#R#T, F#A#R#T) (torch_sqrt_scalar F) @(r, s) input;
 
 anx lam rsqrt (F: Floating) {r: Nat, s: «r; Nat»}
                          (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T) (torch_rsqrt_scalar F) @(r, s) input;
+    tensor.unary @(F#A#R#T, F#A#R#T) (torch_rsqrt_scalar F) @(r, s) input;
 
 anx lam sin (F: Floating) {r: Nat, s: «r; Nat»}
                        (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T) (torch_sin_scalar F) @(r, s) input;
+    tensor.unary @(F#A#R#T, F#A#R#T) (torch_sin_scalar F) @(r, s) input;
 
 anx lam cos (F: Floating) {r: Nat, s: «r; Nat»}
                        (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T) (torch_cos_scalar F) @(r, s) input;
+    tensor.unary @(F#A#R#T, F#A#R#T) (torch_cos_scalar F) @(r, s) input;
 
 anx lam reciprocal (F: Floating) {r: Nat, s: «r; Nat»}
                               (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_reciprocal_scalar F) @(r, s) input;
 
 }
@@ -1475,7 +1500,7 @@ axm masked_fill_scalar: {T: *, rm r: Nat}
 pub mod pointwise_impl {
 anx lam where_ {T: *, r: Nat, s: «r; Nat»}
                          (condition: «s; Bool», lhs: «s; T», rhs: «s; T»): «s; T» =
-    tensor.select_impl @T @(r, s) (condition, lhs, rhs);
+    tensor.select @T @(r, s) (condition, lhs, rhs);
 
 anx lam masked_fill_scalar {T: *, rm r: Nat}
                                          (sm: «rm; Nat», s: «r; Nat»,
@@ -1486,15 +1511,15 @@ anx lam masked_fill_scalar {T: *, rm r: Nat}
     runtime.require (valid, "masked_fill mask is not broadcastable") body
     where
         lam body(): «s; T» =
-            let mask_b = tensor.broadcast_in_dim_impl @(Bool, rm, r)
+            let mask_b = tensor.broadcast_in_dim @(Bool, rm, r)
                 (sm, s, mask, dm);
             let filled = tensor.splat @(T, r) (s, value);
-            tensor.select_impl @T @(r, s) (mask_b, filled, input);
+            tensor.select @T @(r, s) (mask_b, filled, input);
     end;
 
 }
 /// PyTorch API: https://pytorch.org/docs/stable/generated/torch.permute.html
-/// Types: rank-`r` tensor plus an `r`-axis permutation to `tensor.transpose_shape(s, dims)`.
+/// Types: rank-`r` tensor plus an `r`-axis permutation to `torch_transpose_shape(s, dims)`.
 lam torch_permute_shape {r: Nat}
                         (s: «r; Nat», dims: «r; Idx r»): «r; Nat» =
     ‹i: r; s#(dims#i)›;
@@ -1531,7 +1556,7 @@ lam torch_checked_index_cast
     {bound r: Nat, s: «r; Nat»} {n: Nat}
     (message: «n; I8»)
     (input: «s; I64»): «s; Idx bound» =
-    tensor.unary_impl @(I64, Idx bound)
+    tensor.unary @(I64, Idx bound)
         (torch_checked_index_value @(bound, n) message) @(r, s) input;
 
 lam torch_indexed_unary_element
@@ -1539,7 +1564,7 @@ lam torch_indexed_unary_element
     (app: [«r; I64», Ti] → T, input: «s; Ti»)
     (indices: «r; I64»): T =
     let coords = ‹d: r; core.conv.u (s#d) (indices#d)›;
-    app (indices, tensor.get (coords, input));
+    app (indices, input#coords);
 
 lam torch_indexed_unary
     {Ti T: *, r: Nat, s: «r; Nat»}
@@ -1591,7 +1616,7 @@ axm permute: {T: *, r: Nat, s: «r; Nat»}
 /// Types: rank-`r` tensor and two signed axes to the corresponding permuted tensor shape.
 axm transpose_int: {T: *, r: Nat, s: «r; Nat»}
                             → [input: «s; T», dim0: I64, dim1: I64]
-                            → «tensor.transpose_shape (s, torch_transpose_dims @r (dim0, dim1)); T»;
+                            → «torch_transpose_shape (s, torch_transpose_dims @r (dim0, dim1)); T»;
 /// PyTorch API: https://pytorch.org/docs/stable/generated/torch.Tensor.expand.html
 /// Types: `Tensor[T, s_in]` plus explicit broadcast dimensions to `Tensor[T, s_out]`.
 axm expand: {T: *, r_in r_out: Nat}
@@ -1599,12 +1624,12 @@ axm expand: {T: *, r_in r_out: Nat}
                      → [input: «s_in; T», dims: «r_in; Idx r_out»]
                      → «s_out; T»;
 /// PyTorch API: https://pytorch.org/docs/stable/generated/torch.cat.html
-/// Types: a dependent tuple of rank-`r` tensors to `tensor.concat_shape(dimension, shapes)`.
+/// Types: a dependent tuple of rank-`r` tensors to `torch_concat_shape(dimension, shapes)`.
 axm cat: {T: *, ni r: Nat}
                   → [dimension: Idx r]
                   → {shapes: «ni; «r; Nat»»}
                   → «i: ni; «shapes#i; T»»
-                  → «tensor.concat_shape (dimension, shapes); T»;
+                  → «torch_concat_shape (dimension, shapes); T»;
 /// PyTorch API: https://pytorch.org/docs/stable/generated/torch.stack.html
 /// Types: equal-shaped rank-`r_in` tensors gain one singleton axis and are
 /// concatenated along it. The frontend supplies the statically inferred
@@ -1614,7 +1639,7 @@ axm stack: {T: *, ni r_in r_out: Nat}
                        s_singleton: «r_out; Nat»,
                        dimension: Idx r_out]
                     → «ni; «s_in; T»»
-                    → «tensor.concat_shape
+                    → «torch_concat_shape
                          (dimension, ‹i: ni; s_singleton›); T»;
 /// PyTorch API: https://pytorch.org/docs/stable/generated/torch.flatten.html
 /// Types: `Tensor[T, s_in] -> Tensor[T, s_out]`; the frontend computes the flattened shape.
@@ -1644,27 +1669,27 @@ pub mod shape_impl {
 anx lam reshape {T: *, r_in r_out: Nat}
                            (s_in: «r_in; Nat», s_out: «r_out; Nat»)
                            (input: «s_in; T»): «s_out; T» =
-    tensor.reshape_impl @(T, r_in, r_out) s_in s_out input;
+    tensor.reshape @(T, r_in, r_out) s_in s_out input;
 
 anx lam permute {T: *, r: Nat, s: «r; Nat»}
                            (input: «s; T», dims: «r; Idx r»)
                          : «torch_permute_shape (s, dims); T» =
     let out_s = torch_permute_shape (s, dims);
     tensor.map_reduce @1 @(T, r, r) (out_s, out_s)
-        @(T, r, s) (tensor.tensor_copy @T, ⊥: T)
+        @(T, r, s) (torch_tensor_copy @T, ⊥: T)
         (affine.id @r) (torch_permute_map dims,) input;
 
 anx lam transpose_int {T: *, r: Nat, s: «r; Nat»}
                                  (input: «s; T», dim0: I64, dim1: I64)
-                               : «tensor.transpose_shape (s, torch_transpose_dims @r (dim0, dim1)); T» =
+                               : «torch_transpose_shape (s, torch_transpose_dims @r (dim0, dim1)); T» =
     let valid = core.bit2.and_ 0 (
         torch_dim_in_range @r dim0,
         torch_dim_in_range @r dim1);
     runtime.require (valid, "transpose expects in-range dimensions") body
     where
         lam body()
-          : «tensor.transpose_shape (s, torch_transpose_dims @r (dim0, dim1)); T» =
-            tensor.transpose_impl @(T, r)
+          : «torch_transpose_shape (s, torch_transpose_dims @r (dim0, dim1)); T» =
+            tensor.transpose @(T, r)
                 (torch_transpose_dims @r (dim0, dim1)) input;
     end;
 
@@ -1677,7 +1702,7 @@ anx lam cat {T: *, ni r: Nat}
                        (dimension: Idx r)
                      {shapes: «ni; «r; Nat»»}
                        (inputs: «i: ni; «shapes#i; T»»)
-                     : «tensor.concat_shape (dimension, shapes); T» =
+                     : «torch_concat_shape (dimension, shapes); T» =
     tensor.concat @(T, ni, r) dimension @shapes inputs;
 
 anx lam stack {T: *, ni r_in r_out: Nat}
@@ -1685,10 +1710,10 @@ anx lam stack {T: *, ni r_in r_out: Nat}
                            s_singleton: «r_out; Nat»,
                            dimension: Idx r_out)
                           (inputs: «ni; «s_in; T»»)
-                        : «tensor.concat_shape
+                        : «torch_concat_shape
                              (dimension, ‹i: ni; s_singleton›); T» =
     let reshaped = ‹i: ni;
-        tensor.reshape_impl @(T, r_in, r_out)
+        tensor.reshape @(T, r_in, r_out)
             s_in s_singleton (inputs#i)›;
     let shapes = ‹i: ni; s_singleton›;
     tensor.concat @(T, ni, r_out) dimension @shapes reshaped;
@@ -1696,23 +1721,23 @@ anx lam stack {T: *, ni r_in r_out: Nat}
 anx lam flatten {T: *, r_in r_out: Nat}
                            (s_in: «r_in; Nat», s_out: «r_out; Nat»)
                            (input: «s_in; T»): «s_out; T» =
-    tensor.reshape_impl @(T, r_in, r_out) s_in s_out input;
+    tensor.reshape @(T, r_in, r_out) s_in s_out input;
 
 anx lam squeeze {T: *, r_in r_out: Nat}
                            (s_in: «r_in; Nat», s_out: «r_out; Nat»)
                            (input: «s_in; T»): «s_out; T» =
-    tensor.reshape_impl @(T, r_in, r_out) s_in s_out input;
+    tensor.reshape @(T, r_in, r_out) s_in s_out input;
 
 anx lam unsqueeze {T: *, r_in r_out: Nat}
                              (s_in: «r_in; Nat», s_out: «r_out; Nat»)
                              (input: «s_in; T»): «s_out; T» =
-    tensor.reshape_impl @(T, r_in, r_out) s_in s_out input;
+    tensor.reshape @(T, r_in, r_out) s_in s_out input;
 
 anx lam repeat {T: *, r: Nat, s: «r; Nat»}
                           (repeats: «r; Nat»)
                           (input: «s; T»)
                         : «torch_repeat_shape (s, repeats); T» =
-    tensor.repeat_impl @(T, r) s (torch_repeat_shape (s, repeats)) input;
+    tensor.repeat @(T, r) s (torch_repeat_shape (s, repeats)) input;
 
 }
 lam torch_roll_map {r nr: Nat}
@@ -1904,7 +1929,7 @@ axm constant_pad:
     {T: *, r np: Nat, s: «r; Nat»}
     → [padding: «2 * np; Nat», value: T]
     → «s; T»
-    → «tensor.pad_shape
+    → «torch_pad_shape
           (torch_pad_lows @(r, np) padding,
            s,
            torch_pad_highs @(r, np) padding); T»;
@@ -1972,7 +1997,7 @@ anx lam constant_pad
     {T: *, r np: Nat, s: «r; Nat»}
     (padding: «2 * np; Nat», value: T)
     (input: «s; T»)
-  : «tensor.pad_shape
+  : «torch_pad_shape
         (torch_pad_lows @(r, np) padding,
          s,
          torch_pad_highs @(r, np) padding); T» =
@@ -1980,7 +2005,7 @@ anx lam constant_pad
         (np <= r, "pad length must not exceed input rank")
         body
     where
-        lam body(): «tensor.pad_shape
+        lam body(): «torch_pad_shape
               (torch_pad_lows @(r, np) padding,
                s,
                torch_pad_highs @(r, np) padding); T» =
@@ -2016,7 +2041,7 @@ anx lam arange_i64 {size: Nat}
 
 anx lam clone {T: *, r: Nat, s: «r; Nat»}
                          (input: «s; T»): «s; T» =
-    tensor.repeat_impl @(T, r) s s input;
+    tensor.repeat @(T, r) s s input;
 
 anx lam copy {T: *, r: Nat, s: «r; Nat»}
                         (input: «s; T»): «s; T» = input;
@@ -2362,8 +2387,8 @@ lam torch_sum_all_scalar (A: Arithmetic)
                            {r: Nat, s: «r; Nat»}
                            (input: «s; A#R#T»): A#R#T =
     let n = torch_numel s;
-    let flat = tensor.reshape_impl @(A#R#T, r, 1) s (n,) input;
-    let values = ‹i: n; tensor.get ((i,), flat)›;
+    let flat = tensor.reshape @(A#R#T, r, 1) s (n,) input;
+    let values = ‹i: n; flat#(i,)›;
     vec.fold.l A#R#add (A#R#_0, values);
 
 /// Full reductions use two identical output cells so bufferization never has
@@ -2379,9 +2404,9 @@ lam torch_reduce_all_runtime {T: *}
     let padded_n = blocks * block;
     let padding = padded_n - n;
     let padded_extent = n + padding;
-    let flat = tensor.reshape_impl @(T, r, 1) s (n,) input;
+    let flat = tensor.reshape @(T, r, 1) s (n,) input;
     let padded = tensor.pad (n,) (0, (0,), (padding,)) (flat, init);
-    let matrix = tensor.reshape_impl @(T, 1, 2)
+    let matrix = tensor.reshape @(T, 1, 2)
         (padded_extent,) (blocks, block) padded;
     let partial = tensor.map_reduce @1 @(T, 2, 3)
         ((2, blocks), (2, blocks, block))
@@ -2395,7 +2420,7 @@ lam torch_reduce_all_runtime {T: *}
         (tensor.proj_map @(2, 1) (0,))
         (tensor.proj_map @(2, 2) (0, 1),)
         partial;
-    tensor.get ((0_2,), reduced);
+    reduced#(0_2,);
 
 lam torch_sum_all_runtime (A: Arithmetic)
                            {r: Nat, s: «r; Nat»}
@@ -2407,7 +2432,7 @@ lam torch_sum_all_runtime (A: Arithmetic)
 lam torch_pairwise_distance_1d (F: Floating)
     {d: Nat} (eps p: F#A#R#T)
     (lhs rhs: «d; F#A#R#T»): F#A#R#T =
-    let powers = tensor.binary_impl
+    let powers = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         (torch_pairwise_power_scalar F (eps, p))
         @(1, (d,)) (lhs, rhs);
@@ -2427,9 +2452,9 @@ lam torch_blocked_sum_all (A: Arithmetic)
     let padded_n = blocks * block;
     let padding = padded_n - n;
     let padded_extent = n + padding;
-    let flat = tensor.reshape_impl @(A#R#T, r, 1) s (n,) input;
+    let flat = tensor.reshape @(A#R#T, r, 1) s (n,) input;
     let padded = tensor.pad (n,) (0, (0,), (padding,)) (flat, A#R#_0);
-    let matrix = tensor.reshape_impl @(A#R#T, 1, 2)
+    let matrix = tensor.reshape @(A#R#T, 1, 2)
         (padded_extent,) (blocks, block) padded;
     let partial = torch_reduce_dim
         (A#R#add, A#R#_0) ((blocks, block), 1_2) matrix;
@@ -2445,11 +2470,11 @@ lam torch_smooth_l1_pointwise (F: Floating)
      st: «rt; Nat», dt: «rt; Idx ro», so: «ro; Nat»)
     (input: «si; F#A#R#T», target: «st; F#A#R#T»)
     (beta: F#A#R#T)(): «so; F#A#R#T» =
-    let input_b = tensor.broadcast_in_dim_impl @(F#A#R#T, ri, ro)
+    let input_b = tensor.broadcast_in_dim @(F#A#R#T, ri, ro)
         (si, so, input, di);
-    let target_b = tensor.broadcast_in_dim_impl @(F#A#R#T, rt, ro)
+    let target_b = tensor.broadcast_in_dim @(F#A#R#T, rt, ro)
         (st, so, target, dt);
-    tensor.binary_impl
+    tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         (torch_smooth_l1_scalar F beta) @(ro, so) (input_b, target_b);
 
@@ -2460,7 +2485,7 @@ lam torch_kl_div_pointwise (F: Floating)
     {r: Nat, s: «r; Nat»}
     (input target: «s; F#A#R#T»)
     (log_target: Bool)(): «s; F#A#R#T» =
-    tensor.binary_impl
+    tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         (torch_kl_div_scalar F log_target) @(r, s) (input, target);
 
@@ -2480,11 +2505,11 @@ lam torch_triplet_margin_pointwise (F: Floating)
     let n = torch_numel loss_shape;
     let d = s#feature_dim;
     let matrix_shape = (n, d);
-    let anchor_2d = tensor.reshape_impl @(F#A#R#T, r, 2)
+    let anchor_2d = tensor.reshape @(F#A#R#T, r, 2)
         s matrix_shape anchor;
-    let positive_2d = tensor.reshape_impl @(F#A#R#T, r, 2)
+    let positive_2d = tensor.reshape @(F#A#R#T, r, 2)
         s matrix_shape positive;
-    let negative_2d = tensor.reshape_impl @(F#A#R#T, r, 2)
+    let negative_2d = tensor.reshape @(F#A#R#T, r, 2)
         s matrix_shape negative;
     let distance_positive = torch_pairwise_distance_2d F
         @(n, d) (eps, p) (anchor_2d, positive_2d);
@@ -2492,12 +2517,12 @@ lam torch_triplet_margin_pointwise (F: Floating)
         @(n, d) (eps, p) (anchor_2d, negative_2d);
     let distance_swap = torch_pairwise_distance_2d F
         @(n, d) (eps, p) (positive_2d, negative_2d);
-    let swapped_negative = tensor.binary_impl
+    let swapped_negative = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#minimum @(1, (n,)) (distance_negative, distance_swap);
     let effective_negative = core.select @«n; F#A#R#T»
         (swap, swapped_negative, distance_negative);
-    tensor.binary_impl
+    tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         (torch_triplet_margin_scalar F margin)
         @(1, (n,)) (distance_positive, effective_negative);
@@ -2700,14 +2725,14 @@ lam torch_matmul_matrices (A: Arithmetic) {rb m k n: Nat}
     let lhs_shape = vec.cat (batch_shape, (m, k));
     let rhs_shape = vec.cat (batch_shape, (k, n));
     let out_shape = vec.cat (batch_shape, (m, n));
-    let lhs_3d = tensor.reshape_impl
+    let lhs_3d = tensor.reshape
         @(A#R#T, rb + 2, 3)
         lhs_shape (batch, m, k) lhs;
-    let rhs_3d = tensor.reshape_impl
+    let rhs_3d = tensor.reshape
         @(A#R#T, rb + 2, 3)
         rhs_shape (batch, k, n) rhs;
-    let product = tensor.bmm_impl 1 A#R @(batch, m, k, n) (lhs_3d, rhs_3d);
-    tensor.reshape_impl
+    let product = tensor.bmm A#R @(batch, m, k, n) (lhs_3d, rhs_3d);
+    tensor.reshape
         @(A#R#T, 3, rb + 2)
         (batch, m, n) out_shape product;
 
@@ -2749,7 +2774,7 @@ lam torch_grouped_conv2d
         (output_shape,
          (n, cout, output_shape#2_4, output_shape#3_4,
           cin_per_group, kh, kw))
-        (tensor.conv_fun A#R, A#R#_0)
+        (torch_conv_fun A#R, A#R#_0)
         (tensor.proj_map (0, 1, 2, 3))
         (torch_grouped_conv2d_in_map
             (cin_per_group, cout_per_group, stride, dilation),
@@ -2942,7 +2967,7 @@ lam torch_adaptive_pool1d_element (F: Floating)
                 core.bitcast I64 safe,
                 indices#i);
             core.conv.u (s#i) raw›;
-        let value = tensor.get (coords, input);
+        let value = input#coords;
         core.select @F#A#R#T (inside, value, F#A#R#_0)›;
     F#A#div (vec.fold.l F#A#R#add (F#A#R#_0, values), F#from_nat width);
 
@@ -2983,7 +3008,7 @@ lam torch_adaptive_pool2d_window_element (F: Floating)
                 indices#output_i));
         core.conv.u (s#i) raw›;
     core.select @F#A#R#T
-        (inside, tensor.get (coords, input), F#A#R#_0);
+        (inside, input#coords, F#A#R#_0);
 
 lam torch_adaptive_pool2d_divisor_element (F: Floating)
     {r: Nat, s: «r; Nat»}
@@ -3160,7 +3185,7 @@ lam torch_adaptive_pool3d_window_element (F: Floating)
                     indices#output_i)));
         core.conv.u (s#i) raw›;
     core.select @F#A#R#T
-        (inside, tensor.get (coords, input), F#A#R#_0);
+        (inside, input#coords, F#A#R#_0);
 
 lam torch_adaptive_pool3d_divisor_element (F: Floating)
     {r: Nat, s: «r; Nat»}
@@ -3203,8 +3228,8 @@ anx lam max_pool2d
         padding#ff + extra_hi#ff,
         padding#tt + extra_hi#tt);
     let padded = tensor.pad s_in (0, pad_lo, pad_hi) (input, F#neg_inf);
-    let s_padded = tensor.pad_shape (pad_lo, s_in, pad_hi);
-    tensor.pool_impl (F#A#maximum, F#neg_inf)
+    let s_padded = torch_pad_shape (pad_lo, s_in, pad_hi);
+    tensor.pool (F#A#maximum, F#neg_inf)
         @(n, c, s_padded#2_4, s_padded#3_4)
         (kernel, stride, dilation, (0, 0), s_out) padded;
 
@@ -3234,13 +3259,13 @@ anx lam max_pool2d_with_indices
         padding#ff + extra_hi#ff,
         padding#tt + extra_hi#tt);
     let padded = tensor.pad s_in (0, pad_lo, pad_hi) (input, F#neg_inf);
-    let s_padded = tensor.pad_shape (pad_lo, s_in, pad_hi);
+    let s_padded = torch_pad_shape (pad_lo, s_in, pad_hi);
     let flat_indices = tensor.generate @(I64, 4) s_padded
         (torch_pool2d_flat_index @(h, w) padding);
     let output_shape = (n, c, s_out#ff, s_out#tt);
     let iteration_shape = (
         n, c, s_out#ff, s_out#tt, kernel#ff, kernel#tt);
-    let window_map = tensor.pool2d_in_map (stride, dilation);
+    let window_map = torch_pool2d_in_map (stride, dilation);
     let projection = tensor.proj_map @(6, 4) (0, 1, 2, 3);
     let result_indices = tensor.map_reduce @3 @(I64, 4, 6)
         (output_shape, iteration_shape)
@@ -3275,7 +3300,7 @@ anx lam max_pool3d
         padding#1_3 + extra_hi#1_3,
         padding#2_3 + extra_hi#2_3);
     let padded = tensor.pad s_in (0, pad_lo, pad_hi) (input, F#neg_inf);
-    let s_padded = tensor.pad_shape (pad_lo, s_in, pad_hi);
+    let s_padded = torch_pad_shape (pad_lo, s_in, pad_hi);
     torch_pool3d (F#A#maximum, F#neg_inf)
         @(n, c, s_padded#2_5, s_padded#3_5, s_padded#4_5)
         (kernel, stride, dilation, (0, 0, 0), s_out) padded;
@@ -3288,14 +3313,14 @@ anx lam max_pool1d
   : «torch_pool1d_shape
         (n, c, length, kernel, stride, dilation, padding, ceil_mode);
       F#A#R#T» =
-    let input_2d = tensor.reshape_impl @(F#A#R#T, 3, 4)
+    let input_2d = tensor.reshape @(F#A#R#T, 3, 4)
         (n, c, length) (n, c, length, 1) input;
     let output_2d = max_pool2d F @(n, c, length, 1)
         ((kernel, 1), (stride, 1), (padding, 0), (dilation, 1), ceil_mode)
         input_2d;
     let output_shape = torch_pool1d_shape
         (n, c, length, kernel, stride, dilation, padding, ceil_mode);
-    tensor.reshape_impl @(F#A#R#T, 4, 3)
+    tensor.reshape @(F#A#R#T, 4, 3)
         (output_shape#0_3, output_shape#1_3, output_shape#2_3, 1)
         output_shape output_2d;
 
@@ -3333,8 +3358,8 @@ anx lam avg_pool2d
                 padding#tt + extra_hi#tt);
             let padded = tensor.pad
                 s_in (0, pad_lo, pad_hi) (input, F#A#R#_0);
-            let s_padded = tensor.pad_shape (pad_lo, s_in, pad_hi);
-            let summed = tensor.pool_impl
+            let s_padded = torch_pad_shape (pad_lo, s_in, pad_hi);
+            let summed = tensor.pool
                 (F#A#R#add, F#A#R#_0)
                 @(n, c, s_padded#2_4, s_padded#3_4)
                 (kernel, stride, (1, 1), (0, 0), s_out) padded;
@@ -3343,7 +3368,7 @@ anx lam avg_pool2d
                 (torch_avg_pool_divisor F
                     (h, w, kernel, stride, padding, count_include_pad,
                      divisor_override));
-            tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+            tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#div @(4, (n, c, s_out#ff, s_out#tt))
                 (summed, divisors);
     end;
@@ -3383,7 +3408,7 @@ anx lam avg_pool3d
                 padding#2_3 + extra_hi#2_3);
             let padded = tensor.pad
                 s_in (0, pad_lo, pad_hi) (input, F#A#R#_0);
-            let s_padded = tensor.pad_shape (pad_lo, s_in, pad_hi);
+            let s_padded = torch_pad_shape (pad_lo, s_in, pad_hi);
             let summed = torch_pool3d
                 (F#A#R#add, F#A#R#_0)
                 @(n, c, s_padded#2_5, s_padded#3_5, s_padded#4_5)
@@ -3393,7 +3418,7 @@ anx lam avg_pool3d
                 (torch_avg_pool3d_divisor F
                     (d, h, w, kernel, stride, padding, count_include_pad,
                      divisor_override));
-            tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+            tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#div @(5, (n, c, s_out#0_3, s_out#1_3, s_out#2_3))
                 (summed, divisors);
     end;
@@ -3407,7 +3432,7 @@ anx lam avg_pool1d
   : «torch_pool1d_shape
         (n, c, length, kernel, stride, 1, padding, ceil_mode);
       F#A#R#T» =
-    let input_2d = tensor.reshape_impl @(F#A#R#T, 3, 4)
+    let input_2d = tensor.reshape @(F#A#R#T, 3, 4)
         (n, c, length) (n, c, length, 1) input;
     let output_2d = avg_pool2d F @(n, c, length, 1)
         ((kernel, 1), (stride, 1), (padding, 0),
@@ -3415,7 +3440,7 @@ anx lam avg_pool1d
         input_2d;
     let output_shape = torch_pool1d_shape
         (n, c, length, kernel, stride, 1, padding, ceil_mode);
-    tensor.reshape_impl @(F#A#R#T, 4, 3)
+    tensor.reshape @(F#A#R#T, 4, 3)
         (output_shape#0_3, output_shape#1_3, output_shape#2_3, 1)
         output_shape output_2d;
 
@@ -3484,7 +3509,7 @@ anx lam adaptive_avg_pool2d (F: Floating)
                 output_shape
                 (torch_adaptive_pool2d_divisor_element F
                     @(r, s) output_size);
-            tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+            tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#div @(r, output_shape) (summed, divisors);
     end;
 
@@ -3532,7 +3557,7 @@ anx lam adaptive_avg_pool3d (F: Floating)
                 output_shape
                 (torch_adaptive_pool3d_divisor_element F
                     @(r, s) output_size);
-            tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+            tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#div @(r, output_shape) (summed, divisors);
     end;
 
@@ -3710,32 +3735,32 @@ lam torch_batch_norm_apply (F: Floating)
      eps: F#A#R#T): «s; F#A#R#T» =
     let channel_dim = torch_channel_dim @r;
     let channels = s#channel_dim;
-    let variance_eps = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let variance_eps = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_add_scalar F#A eps) @(1, (channels,)) variance;
-    let rstd = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let rstd = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_rsqrt_scalar F) @(1, (channels,)) variance_eps;
-    let mean_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+    let mean_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
         ((channels,), s, mean, (channel_dim,));
-    let rstd_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+    let rstd_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
         ((channels,), s, rstd, (channel_dim,));
-    let centered = tensor.binary_impl
+    let centered = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#sub @(r, s) (input, mean_b);
-    let normalized = tensor.binary_impl
+    let normalized = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#mul @(r, s) (centered, rstd_b);
     let effective_weight = option.unwrap_or
         weight ‹channels; F#from_nat 1›;
     let effective_bias = option.unwrap_or
         bias ‹channels; F#A#R#_0›;
-    let weight_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+    let weight_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
         ((channels,), s, effective_weight, (channel_dim,));
-    let bias_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+    let bias_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
         ((channels,), s, effective_bias, (channel_dim,));
-    let scaled = tensor.binary_impl
+    let scaled = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#mul @(r, s) (normalized, weight_b);
-    tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#add @(r, s) (scaled, bias_b);
 
 /// Stable PyTorch softmax/log-softmax decomposition:
@@ -3775,10 +3800,10 @@ lam torch_softmax_common (F: Floating)
                 lam stabilized(): «s; F#A#R#T» =
                     let maximum = torch_reduce_dim (F#A#maximum, F#neg_inf) (s, dim) input;
                     let maximum_b = torch_broadcast_reduced @(F#A#R#T, r) (s, dim) maximum;
-                    tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+                    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                         F#A#sub @(r, s) (input, maximum_b);
             end;
-            let unnormalized = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let unnormalized = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_exp_scalar F) @(r, s) shifted;
             let denominator = torch_reduce_dim
                 (F#A#R#add, F#A#R#_0) (s, dim) unnormalized;
@@ -3787,12 +3812,12 @@ lam torch_softmax_common (F: Floating)
             (core.select (log, log_result, softmax_result)) ()
             where
                 lam softmax_result(): «s; F#A#R#T» =
-                    tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+                    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                         F#A#div @(r, s) (unnormalized, denominator_b);
                 lam log_result(): «s; F#A#R#T» =
-                    let log_denominator = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+                    let log_denominator = tensor.unary @(F#A#R#T, F#A#R#T)
                         (torch_log_scalar F) @(r, s) denominator_b;
-                    tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+                    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                         F#A#sub @(r, s) (shifted, log_denominator);
             end;
     end;
@@ -3957,17 +3982,17 @@ lam triangular_apply {T: *, r: Nat} (s: «r; Nat»)
                      (input: «s; T»): «s; T» =
     let mask = tensor.generate @(Bool, r) s
         (triangular_keep @r (upper, diagonal));
-    tensor.binary_impl @(Bool, T, T) (triangular_select @T zero)
+    tensor.binary @(Bool, T, T) (triangular_select @T zero)
         @(r, s) (mask, input);
 
 pub mod linalg_impl {
 anx lam mm (A: Arithmetic) {m k n: Nat}
                       (lhs: «m, k; A#R#T», rhs: «k, n; A#R#T»): «m, n; A#R#T» =
-    tensor.product_2d_impl 1 A#R @(m, k, n) (lhs, rhs);
+    tensor.product_2d A#R @(m, k, n) (lhs, rhs);
 
 anx lam bmm (A: Arithmetic) {b m k n: Nat}
                        (lhs: «b, m, k; A#R#T», rhs: «b, k, n; A#R#T»): «b, m, n; A#R#T» =
-    tensor.bmm_impl 1 A#R @(b, m, k, n) (lhs, rhs);
+    tensor.bmm A#R @(b, m, k, n) (lhs, rhs);
 
 anx lam matmul (A: Arithmetic)
                           {rl rr: Nat, sl: «rl; Nat», sr: «rr; Nat»}
@@ -3991,15 +4016,15 @@ anx lam matmul (A: Arithmetic)
             let n = torch_matmul_cols sr;
             let lhs_shape = vec.cat (batch_shape, (m, k));
             let rhs_shape = vec.cat (batch_shape, (k, n));
-            let lhs_matrix = tensor.broadcast_in_dim_impl
+            let lhs_matrix = tensor.broadcast_in_dim
                 @(A#R#T, rl, rb + 2)
                 (sl, lhs_shape, lhs, torch_matmul_lhs_dims @(rl, rb) ());
-            let rhs_matrix = tensor.broadcast_in_dim_impl
+            let rhs_matrix = tensor.broadcast_in_dim
                 @(A#R#T, rr, rb + 2)
                 (sr, rhs_shape, rhs, torch_matmul_rhs_dims @(rr, rb) ());
             let product = torch_matmul_matrices A @(rb, m, k, n)
                 batch_shape (lhs_matrix, rhs_matrix);
-            tensor.reshape_impl
+            tensor.reshape
                 @(A#R#T, rb + 2, torch_matmul_output_rank (rl, rr))
                 (vec.cat (batch_shape, (m, n)))
                 (torch_matmul_output_shape (sl, sr))
@@ -4018,8 +4043,8 @@ anx lam addmm (A: Arithmetic)
         body
     where
         lam body(): «m, n; A#R#T» =
-            let product = tensor.product_2d_impl 1 A#R @(m, k, n) (mat1, mat2);
-            let scaled_product = tensor.unary_impl @(A#R#T, A#R#T)
+            let product = tensor.product_2d A#R @(m, k, n) (mat1, mat2);
+            let scaled_product = tensor.unary @(A#R#T, A#R#T)
                 (torch_scale_scalar A alpha) @(2, (m, n)) product;
             (core.select (A#is_zero beta, without_self, with_self)) ()
             where
@@ -4028,11 +4053,11 @@ anx lam addmm (A: Arithmetic)
                 // and lets PE delete the broadcast and multiply completely.
                 lam without_self(): «m, n; A#R#T» = scaled_product;
                 lam with_self(): «m, n; A#R#T» =
-                    let broadcast_self = tensor.broadcast_in_dim_impl @(A#R#T, ri, 2)
+                    let broadcast_self = tensor.broadcast_in_dim @(A#R#T, ri, 2)
                         (s_self, (m, n), self, self_dims);
-                    let scaled_self = tensor.unary_impl @(A#R#T, A#R#T)
+                    let scaled_self = tensor.unary @(A#R#T, A#R#T)
                         (torch_scale_scalar A beta) @(2, (m, n)) broadcast_self;
-                    tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+                    tensor.binary @(A#R#T, A#R#T, A#R#T)
                         A#R#add @(2, (m, n)) (scaled_product, scaled_self);
             end;
     end;
@@ -4064,9 +4089,9 @@ anx lam linear (A: Arithmetic) {rb k n: Nat}
          tensor.proj_map @(loops, 2) weight_subs)
         (input, weight);
     let effective_bias = option.unwrap_or bias ‹n; A#R#_0›;
-    let broadcast_bias = tensor.broadcast_in_dim_impl @(A#R#T, 1, ro)
+    let broadcast_bias = tensor.broadcast_in_dim @(A#R#T, 1, ro)
         ((n,), output_shape, effective_bias, (core.idx 0 ro  rb,));
-    tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+    tensor.binary @(A#R#T, A#R#T, A#R#T)
         A#R#add @(ro, output_shape) (product, broadcast_bias);
 
 anx lam triu {T: *, r: Nat, s: «r; Nat»}
@@ -4160,7 +4185,7 @@ lam torch_grouped_conv3d
         (output_shape,
          (n, cout, output_shape#2_5, output_shape#3_5,
           output_shape#4_5, cin_per_group, kd, kh, kw))
-        (tensor.conv_fun A#R, A#R#_0)
+        (torch_conv_fun A#R, A#R#_0)
         (tensor.proj_map (0, 1, 2, 3, 4))
         (torch_grouped_conv3d_in_map
             (cin_per_group, cout_per_group, stride, dilation),
@@ -4207,12 +4232,12 @@ lam torch_conv_transpose2d_weight
     (weight: «cin, cout_per_group, kh, kw; A#R#T»)
   : «cout, cin / groups, kh, kw; A#R#T» =
     let cin_per_group = cin / groups;
-    let grouped_weight = tensor.reshape_impl @(A#R#T, 4, 5)
+    let grouped_weight = tensor.reshape @(A#R#T, 4, 5)
         (cin, cout_per_group, kh, kw)
         (groups, cin_per_group, cout_per_group, kh, kw) weight;
-    let swapped_weight = tensor.transpose_impl @(A#R#T, 5)
+    let swapped_weight = tensor.transpose @(A#R#T, 5)
         (0_5, 2_5, 1_5, 3_5, 4_5) grouped_weight;
-    let oi_weight = tensor.reshape_impl @(A#R#T, 5, 4)
+    let oi_weight = tensor.reshape @(A#R#T, 5, 4)
         (groups, cout_per_group, cin_per_group, kh, kw)
         (cout, cin_per_group, kh, kw) swapped_weight;
     tensor.map_reduce @1 @(A#R#T, 4, 4)
@@ -4249,7 +4274,7 @@ lam torch_grouped_conv_transpose2d_unit_stride
     let output_shape = conv_transpose2d_shape
         (n, cout, (h, w), (kh, kw),
          stride, dilation, padding, output_padding);
-    tensor.reshape_impl @(A#R#T, 4, 4)
+    tensor.reshape @(A#R#T, 4, 4)
         result_shape output_shape result;
 
 /// Inserts zeros between NCHW spatial samples and appends output padding.
@@ -4258,7 +4283,7 @@ lam torch_crop_prefix {T: *, r: Nat}
                       (s_in s_out: «r; Nat»)
                       (input: «s_in; T»): «s_out; T» =
     tensor.map_reduce @1 @(T, r, r) (s_out, s_out)
-        @(T, r, s_in) (tensor.tensor_copy, ⊥: T)
+        @(T, r, s_in) (torch_tensor_copy, ⊥: T)
         (affine.id @r) (affine.id @r,) input;
 
 lam torch_zero_insert2d
@@ -4280,7 +4305,7 @@ lam torch_zero_insert2d
     let output_shape = (n, c, uh, uw);
 
     let width_expanded_shape = (n, c, h, w, 1);
-    let width_expanded = tensor.reshape_impl @(A#R#T, 4, 5)
+    let width_expanded = tensor.reshape @(A#R#T, 4, 5)
         input_shape width_expanded_shape input;
     let width_block_extent =
         1 + (stride#1_2 - 1);
@@ -4289,7 +4314,7 @@ lam torch_zero_insert2d
          (0, 0, 0, 0, stride#1_2 - 1))
         (width_expanded, A#R#_0);
     let width_dense_extent = w * width_block_extent;
-    let width_dense = tensor.reshape_impl @(A#R#T, 5, 4)
+    let width_dense = tensor.reshape @(A#R#T, 5, 4)
         (n, c, h, w, width_block_extent)
         (n, c, h, width_dense_extent) width_block;
     let width_extra = uw - width_dense_extent;
@@ -4303,7 +4328,7 @@ lam torch_zero_insert2d
         width_available;
 
     let height_expanded_shape = (n, c, h, 1, uw);
-    let height_expanded = tensor.reshape_impl @(A#R#T, 4, 5)
+    let height_expanded = tensor.reshape @(A#R#T, 4, 5)
         width_shape height_expanded_shape width_upsampled;
     let height_block_extent =
         1 + (stride#0_2 - 1);
@@ -4312,7 +4337,7 @@ lam torch_zero_insert2d
          (0, 0, 0, stride#0_2 - 1, 0))
         (height_expanded, A#R#_0);
     let height_dense_extent = h * height_block_extent;
-    let height_dense = tensor.reshape_impl @(A#R#T, 5, 4)
+    let height_dense = tensor.reshape @(A#R#T, 5, 4)
         (n, c, h, height_block_extent, uw)
         (n, c, height_dense_extent, uw) height_block;
     let height_extra = uh - height_dense_extent;
@@ -4345,7 +4370,7 @@ lam torch_grouped_conv_transpose2d_strided
     // Python pseudocode: insert `stride_w - 1` zeros after each input column,
     // append output padding, then trim to the exact expanded width.
     let width_expanded_shape = (n, cin, h, w, 1);
-    let width_expanded = tensor.reshape_impl @(A#R#T, 4, 5)
+    let width_expanded = tensor.reshape @(A#R#T, 4, 5)
         input_shape width_expanded_shape input;
     let width_block_extent =
         1 + (stride#1_2 - 1);
@@ -4354,7 +4379,7 @@ lam torch_grouped_conv_transpose2d_strided
          (0, 0, 0, 0, stride#1_2 - 1))
         (width_expanded, A#R#_0);
     let width_dense_extent = w * width_block_extent;
-    let width_dense = tensor.reshape_impl @(A#R#T, 5, 4)
+    let width_dense = tensor.reshape @(A#R#T, 5, 4)
         (n, cin, h, w, width_block_extent)
         (n, cin, h, width_dense_extent) width_block;
     let width_extra = uw - width_dense_extent;
@@ -4369,7 +4394,7 @@ lam torch_grouped_conv_transpose2d_strided
 
     // Apply the same zero insertion to height.
     let height_expanded_shape = (n, cin, h, 1, uw);
-    let height_expanded = tensor.reshape_impl @(A#R#T, 4, 5)
+    let height_expanded = tensor.reshape @(A#R#T, 4, 5)
         width_shape height_expanded_shape width_upsampled;
     let height_block_extent =
         1 + (stride#0_2 - 1);
@@ -4378,7 +4403,7 @@ lam torch_grouped_conv_transpose2d_strided
          (0, 0, 0, stride#0_2 - 1, 0))
         (height_expanded, A#R#_0);
     let height_dense_extent = h * height_block_extent;
-    let height_dense = tensor.reshape_impl @(A#R#T, 5, 4)
+    let height_dense = tensor.reshape @(A#R#T, 5, 4)
         (n, cin, h, height_block_extent, uw)
         (n, cin, height_dense_extent, uw) height_block;
     let height_extra = uh - height_dense_extent;
@@ -4401,7 +4426,7 @@ lam torch_grouped_conv_transpose2d_strided
     let output_shape = conv_transpose2d_shape
         (n, cout, (h, w), (kh, kw),
          stride, dilation, padding, output_padding);
-    tensor.reshape_impl @(A#R#T, 4, 4)
+    tensor.reshape @(A#R#T, 4, 4)
         unit_shape output_shape unit_result;
 
 lam torch_grouped_conv_transpose2d
@@ -4563,12 +4588,12 @@ lam torch_conv_transpose3d_weight
     (weight: «cin, cout_per_group, kd, kh, kw; A#R#T»)
   : «cout, cin / groups, kd, kh, kw; A#R#T» =
     let cin_per_group = cin / groups;
-    let grouped_weight = tensor.reshape_impl @(A#R#T, 5, 6)
+    let grouped_weight = tensor.reshape @(A#R#T, 5, 6)
         (cin, cout_per_group, kd, kh, kw)
         (groups, cin_per_group, cout_per_group, kd, kh, kw) weight;
-    let swapped_weight = tensor.transpose_impl @(A#R#T, 6)
+    let swapped_weight = tensor.transpose @(A#R#T, 6)
         (0_6, 2_6, 1_6, 3_6, 4_6, 5_6) grouped_weight;
-    let oi_weight = tensor.reshape_impl @(A#R#T, 6, 5)
+    let oi_weight = tensor.reshape @(A#R#T, 6, 5)
         (groups, cout_per_group, cin_per_group, kd, kh, kw)
         (cout, cin_per_group, kd, kh, kw) swapped_weight;
     tensor.map_reduce @1 @(A#R#T, 5, 5)
@@ -4606,7 +4631,7 @@ lam torch_grouped_conv_transpose3d_unit_stride
     let output_shape = conv_transpose3d_shape
         (n, cout, (d, h, w), (kd, kh, kw),
          stride, dilation, padding, output_padding);
-    tensor.reshape_impl @(A#R#T, 5, 5)
+    tensor.reshape @(A#R#T, 5, 5)
         result_shape output_shape result;
 
 lam torch_grouped_conv_transpose3d_strided
@@ -4627,32 +4652,32 @@ lam torch_grouped_conv_transpose3d_strided
 
     // Treat every depth plane as an NCHW image while inserting H/W zeros.
     let plane_batch = n * d;
-    let planes = tensor.reshape_impl @(A#R#T, 5, 4)
+    let planes = tensor.reshape @(A#R#T, 5, 4)
         (n, cin, d, h, w) (plane_batch, cin, h, w) input;
     let expanded_planes = torch_zero_insert2d A
         @(plane_batch, cin, h, w)
         ((stride#1_3, stride#2_3),
          (output_padding#1_3, output_padding#2_3))
         planes;
-    let spatially_expanded = tensor.reshape_impl @(A#R#T, 4, 5)
+    let spatially_expanded = tensor.reshape @(A#R#T, 4, 5)
         (plane_batch, cin, uh, uw) (n, cin, d, uh, uw)
         expanded_planes;
 
     // Move D to a 2-D helper's height axis and collapse N/H/W into batch.
-    let depth_major = tensor.transpose_impl @(A#R#T, 5)
+    let depth_major = tensor.transpose @(A#R#T, 5)
         (0_5, 3_5, 4_5, 1_5, 2_5) spatially_expanded;
     let depth_batch = n * (uh * uw);
-    let depth_rows = tensor.reshape_impl @(A#R#T, 5, 4)
+    let depth_rows = tensor.reshape @(A#R#T, 5, 4)
         (n, uh, uw, cin, d) (depth_batch, cin, d, 1)
         depth_major;
     let expanded_depth_rows = torch_zero_insert2d A
         @(depth_batch, cin, d, 1)
         ((stride#0_3, 1), (output_padding#0_3, 0))
         depth_rows;
-    let expanded_depth_major = tensor.reshape_impl @(A#R#T, 4, 5)
+    let expanded_depth_major = tensor.reshape @(A#R#T, 4, 5)
         (depth_batch, cin, ud, 1) (n, uh, uw, cin, ud)
         expanded_depth_rows;
-    let upsampled = tensor.transpose_impl @(A#R#T, 5)
+    let upsampled = tensor.transpose @(A#R#T, 5)
         (0_5, 3_5, 4_5, 1_5, 2_5) expanded_depth_major;
 
     let unit_result = torch_grouped_conv_transpose3d_unit_stride A
@@ -4665,7 +4690,7 @@ lam torch_grouped_conv_transpose3d_strided
     let output_shape = conv_transpose3d_shape
         (n, cout, (d, h, w), (kd, kh, kw),
          stride, dilation, padding, output_padding);
-    tensor.reshape_impl @(A#R#T, 5, 5)
+    tensor.reshape @(A#R#T, 5, 5)
         unit_shape output_shape unit_result;
 
 lam torch_grouped_conv_transpose3d
@@ -4733,10 +4758,10 @@ anx lam general
                 (groups, stride, dilation, padding)
                 (input, weight);
             let effective_bias = option.unwrap_or bias ‹cout; A#R#_0›;
-            let broadcast_bias = tensor.broadcast_in_dim_impl
+            let broadcast_bias = tensor.broadcast_in_dim
                 @(A#R#T, 1, 4)
                 ((cout,), output_shape, effective_bias, (1_4,));
-            tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#R#add @(4, output_shape) (convolved, broadcast_bias);
     end;
 
@@ -4750,9 +4775,9 @@ anx lam conv1d
      bias: option.Opt «cout; A#R#T»)
   : «torch_conv1d_shape
         (n, cout, length, kernel, stride, dilation, padding); A#R#T» =
-    let input_2d = tensor.reshape_impl @(A#R#T, 3, 4)
+    let input_2d = tensor.reshape @(A#R#T, 3, 4)
         (n, cin, length) (n, cin, length, 1) input;
-    let weight_2d = tensor.reshape_impl @(A#R#T, 3, 4)
+    let weight_2d = tensor.reshape @(A#R#T, 3, 4)
         (cout, cin_per_group, kernel) (cout, cin_per_group, kernel, 1) weight;
     let output_2d = general A
         @(n, cin, cout, cin_per_group, length, 1, kernel, 1)
@@ -4764,7 +4789,7 @@ anx lam conv1d
     let output_2d_shape = tensor.conv_shape
         (n, cout, (length, 1), (kernel, 1),
          (stride, 1), (dilation, 1), (padding, 0));
-    tensor.reshape_impl @(A#R#T, 4, 3)
+    tensor.reshape @(A#R#T, 4, 3)
         output_2d_shape output_shape output_2d;
 
 anx lam conv3d
@@ -4806,10 +4831,10 @@ anx lam conv3d
                 (groups, stride, dilation, padding)
                 (input, weight);
             let effective_bias = option.unwrap_or bias ‹cout; A#R#_0›;
-            let broadcast_bias = tensor.broadcast_in_dim_impl
+            let broadcast_bias = tensor.broadcast_in_dim
                 @(A#R#T, 1, 5)
                 ((cout,), output_shape, effective_bias, (1_5,));
-            tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#R#add @(5, output_shape) (convolved, broadcast_bias);
     end;
 
@@ -4865,10 +4890,10 @@ anx lam transpose2d
                 (groups, stride, dilation, padding, output_padding)
                 (input, weight);
             let effective_bias = option.unwrap_or bias ‹cout; A#R#_0›;
-            let broadcast_bias = tensor.broadcast_in_dim_impl
+            let broadcast_bias = tensor.broadcast_in_dim
                 @(A#R#T, 1, 4)
                 ((cout,), output_shape, effective_bias, (1_4,));
-            tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#R#add @(4, output_shape) (convolved, broadcast_bias);
     end;
 
@@ -4882,9 +4907,9 @@ anx lam transpose1d
   : «torch_conv_transpose1d_shape
         (n, cout, length, kernel, stride, dilation, padding, output_padding);
      A#R#T» =
-    let input_2d = tensor.reshape_impl @(A#R#T, 3, 4)
+    let input_2d = tensor.reshape @(A#R#T, 3, 4)
         (n, cin, length) (n, cin, length, 1) input;
-    let weight_2d = tensor.reshape_impl @(A#R#T, 3, 4)
+    let weight_2d = tensor.reshape @(A#R#T, 3, 4)
         (cin, cout_per_group, kernel)
         (cin, cout_per_group, kernel, 1) weight;
     let output_2d = transpose2d A
@@ -4897,7 +4922,7 @@ anx lam transpose1d
          (stride, 1), (dilation, 1), (padding, 0), (output_padding, 0));
     let output_shape = torch_conv_transpose1d_shape
         (n, cout, length, kernel, stride, dilation, padding, output_padding);
-    tensor.reshape_impl @(A#R#T, 4, 3)
+    tensor.reshape @(A#R#T, 4, 3)
         output_2d_shape output_shape output_2d;
 
 anx lam transpose3d
@@ -4947,10 +4972,10 @@ anx lam transpose3d
                 (groups, stride, dilation, padding, output_padding)
                 (input, weight);
             let effective_bias = option.unwrap_or bias ‹cout; A#R#_0›;
-            let broadcast_bias = tensor.broadcast_in_dim_impl
+            let broadcast_bias = tensor.broadcast_in_dim
                 @(A#R#T, 1, 5)
                 ((cout,), output_shape, effective_bias, (1_5,));
-            tensor.binary_impl @(A#R#T, A#R#T, A#R#T)
+            tensor.binary @(A#R#T, A#R#T, A#R#T)
                 A#R#add @(5, output_shape) (convolved, broadcast_bias);
     end;
 
@@ -4966,51 +4991,51 @@ pub mod activation_impl {
 anx lam relu (A: Arithmetic)
                                 {r: Nat, s: «r; Nat»}
                                 (input: «s; A#R#T»): «s; A#R#T» =
-    tensor.unary_impl @(A#R#T, A#R#T) (torch_relu_scalar A) @(r, s) input;
+    tensor.unary @(A#R#T, A#R#T) (torch_relu_scalar A) @(r, s) input;
 
 anx lam leaky_relu (F: Floating)
                                       {r: Nat, s: «r; Nat»}
                                       (input: «s; F#A#R#T»,
                                        negative_slope: F#A#R#T): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_leaky_relu_scalar F negative_slope) @(r, s) input;
 
 anx lam tanh (F: Floating) {r: Nat, s: «r; Nat»}
                                 (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T) (torch_tanh_scalar F) @(r, s) input;
+    tensor.unary @(F#A#R#T, F#A#R#T) (torch_tanh_scalar F) @(r, s) input;
 
 anx lam sigmoid (F: Floating) {r: Nat, s: «r; Nat»}
                                    (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_sigmoid_scalar F) @(r, s) input;
 
 anx lam silu (F: Floating) {r: Nat, s: «r; Nat»}
                                 (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_silu_scalar F) @(r, s) input;
 
 anx lam gelu (F: Floating) {r: Nat, s: «r; Nat»}
                                 (approximate_tanh: Bool,
                                  input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_gelu_scalar F approximate_tanh) @(r, s) input;
 
 anx lam elu (F: Floating) {r: Nat, s: «r; Nat»}
     (input: «s; F#A#R#T», alpha scale input_scale: F#A#R#T)
   : «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_elu_scalar F (alpha, scale, input_scale)) @(r, s) input;
 
 anx lam selu (F: Floating) {r: Nat, s: «r; Nat»}
     (input: «s; F#A#R#T»): «s; F#A#R#T» =
     let alpha = F#A#div (F#from_nat 1673263, F#from_nat 1000000);
     let scale = F#A#div (F#from_nat 1050701, F#from_nat 1000000);
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_elu_scalar F (alpha, scale, F#from_nat 1)) @(r, s) input;
 
 anx lam hardsigmoid (F: Floating)
     {r: Nat, s: «r; Nat»} (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_hardsigmoid_scalar F) @(r, s) input;
 
 anx lam softplus (F: Floating)
@@ -5019,7 +5044,7 @@ anx lam softplus (F: Floating)
     runtime.require (F#A#ne (beta, F#A#R#_0), "softplus expects beta != 0") body
     where
         lam body(): «s; F#A#R#T» =
-            tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_softplus_scalar F (beta, threshold)) @(r, s) input;
     end;
 
@@ -5031,9 +5056,9 @@ anx lam hardtanh (A: Arithmetic)
         (A#le (minimum, maximum), "hardtanh expects min_val <= max_val") body
     where
         lam body(): «s; A#R#T» =
-            let lower_bounded = tensor.unary_impl @(A#R#T, A#R#T)
+            let lower_bounded = tensor.unary @(A#R#T, A#R#T)
                 (torch_clamp_min_scalar A minimum) @(r, s) input;
-            tensor.unary_impl @(A#R#T, A#R#T)
+            tensor.unary @(A#R#T, A#R#T)
                 (torch_clamp_max_scalar A maximum) @(r, s) lower_bounded;
     end;
 
@@ -5041,7 +5066,7 @@ anx lam threshold (A: Arithmetic)
                              {r: Nat, s: «r; Nat»}
                              (input: «s; A#R#T»,
                               threshold: A#R#T, value: A#R#T): «s; A#R#T» =
-    tensor.unary_impl @(A#R#T, A#R#T)
+    tensor.unary @(A#R#T, A#R#T)
         (torch_threshold_scalar A (threshold, value)) @(r, s) input;
 
 anx lam clamp (A: Arithmetic)
@@ -5056,12 +5081,12 @@ anx lam clamp (A: Arithmetic)
         lam body(): «s; A#R#T» =
             let lower_bounded = match minimum with
                 | bound: A#R#T =>
-                    tensor.unary_impl @(A#R#T, A#R#T)
+                    tensor.unary @(A#R#T, A#R#T)
                         (torch_clamp_min_scalar A bound) @(r, s) input
                 | _: [] => input;
             match maximum with
                 | bound: A#R#T =>
-                    tensor.unary_impl @(A#R#T, A#R#T)
+                    tensor.unary @(A#R#T, A#R#T)
                         (torch_clamp_max_scalar A bound) @(r, s) lower_bounded
                 | _: [] => lower_bounded;
     end;
@@ -5069,7 +5094,7 @@ anx lam clamp (A: Arithmetic)
 anx lam mish (F: Floating)
     {r: Nat, s: «r; Nat»}
     (input: «s; F#A#R#T»): «s; F#A#R#T» =
-    tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_mish_scalar F) @(r, s) input;
 
 }
@@ -5099,20 +5124,20 @@ lam torch_logsumexp_dims (F: Floating)
     let s_out = torch_multi_reduce_shape (s, dims);
     let maximum = torch_multi_reduce
         (F#A#maximum, F#neg_inf) (s, dims) input;
-    let finite_maximum = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let finite_maximum = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_logsumexp_finite_max F) @(ro, s_out) maximum;
-    let maximum_b = tensor.broadcast_in_dim_impl @(F#A#R#T, ro, r)
+    let maximum_b = tensor.broadcast_in_dim @(F#A#R#T, ro, r)
         (s_out, s, finite_maximum, torch_kept_axes dims);
-    let shifted = tensor.binary_impl
+    let shifted = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#sub @(r, s) (input, maximum_b);
-    let exponentials = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let exponentials = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_exp_scalar F) @(r, s) shifted;
     let total = torch_multi_reduce
         (F#A#R#add, F#A#R#_0) (s, dims) exponentials;
-    let logarithm = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let logarithm = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_log_scalar F) @(ro, s_out) total;
-    tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#add @(ro, s_out) (logarithm, finite_maximum);
 
 pub mod reduction_impl {
@@ -5203,7 +5228,7 @@ anx lam mean_dim (F: Floating)
             let dim = torch_canonical_dim @r dimension;
             let reduced = torch_reduce_dim (F#A#R#add, F#A#R#_0) (s, dim) input;
             let count = F#from_nat (s#dim);
-            tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count)
                 @(r - 1, torch_reduce_shape (s, dim)) reduced;
     end;
@@ -5224,7 +5249,7 @@ anx lam mean_dim_keepdim (F: Floating)
             let reduced = torch_reduce_dim
                 (F#A#R#add, F#A#R#_0) (s, dim) input;
             let count = F#from_nat (s#dim);
-            let mean = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let mean = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count)
                 @(r - 1, torch_reduce_shape (s, dim)) reduced;
             tensor.reshape @(F#A#R#T, r - 1, r)
@@ -5264,7 +5289,7 @@ anx lam sum_dims_keepdim (A: Arithmetic)
                 (s, torch_canonical_dims @(r, nr) dimensions); A#R#T» =
             let dims = torch_canonical_dims @(r, nr) dimensions;
             let reduced = torch_multi_reduce (A#R#add, A#R#_0) (s, dims) input;
-            tensor.reshape_impl
+            tensor.reshape
                 @(A#R#T, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims))
@@ -5285,7 +5310,7 @@ anx lam sum (A: Arithmetic)
             let dims = torch_canonical_dims @(r, nr) dimensions;
             let reduced = torch_multi_reduce
                 (A#R#add, A#R#_0) (s, dims) input;
-            let kept = tensor.reshape_impl
+            let kept = tensor.reshape
                 @(A#R#T, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims))
@@ -5304,11 +5329,11 @@ anx lam sum_typed (D: Reduction)
     where
         lam body() =
             let dims = torch_canonical_dims @(r, nr) dimensions;
-            let converted = tensor.unary_impl @(D#Input, D#Output)
+            let converted = tensor.unary @(D#Input, D#Output)
                 D#cast @(r, s) input;
             let reduced = torch_multi_reduce
                 (D#add, D#zero) (s, dims) converted;
-            let kept = tensor.reshape_impl
+            let kept = tensor.reshape
                 @(D#Output, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims)) reduced;
@@ -5329,11 +5354,11 @@ anx lam norm2_dims (F: Floating)
         lam body(): «torch_multi_reduce_shape
                 (s, torch_canonical_dims @(r, nr) dimensions); F#A#R#T» =
             let dims = torch_canonical_dims @(r, nr) dimensions;
-            let squared = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let squared = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_square_scalar F#A) @(r, s) input;
             let reduced = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) squared;
-            tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_sqrt_scalar F)
                 @(torch_reduced_rank dims, torch_multi_reduce_shape (s, dims))
                 reduced;
@@ -5353,16 +5378,16 @@ anx lam norm2_dims_keepdim (F: Floating)
         lam body(): «torch_multi_keepdim_shape
                 (s, torch_canonical_dims @(r, nr) dimensions); F#A#R#T» =
             let dims = torch_canonical_dims @(r, nr) dimensions;
-            let squared = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let squared = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_square_scalar F#A) @(r, s) input;
             let reduced = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) squared;
-            let kept = tensor.reshape_impl
+            let kept = tensor.reshape
                 @(F#A#R#T, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims))
                 reduced;
-            tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_sqrt_scalar F)
                 @(r, torch_multi_keepdim_shape (s, dims)) kept;
     end;
@@ -5380,16 +5405,16 @@ anx lam vector_norm (F: Floating)
             let dims = torch_canonical_dims @(r, nr) dimensions;
             let out_rank = torch_reduced_rank dims;
             let out_shape = torch_multi_reduce_shape (s, dims);
-            let absolute = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let absolute = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_abs_scalar F#A) @(r, s) input;
-            let powered = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let powered = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_pow_scalar F p) @(r, s) absolute;
             let power_sum = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) powered;
             let reciprocal = F#A#div (F#from_nat 1, p);
-            let lp = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let lp = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_pow_scalar F reciprocal) @(out_rank, out_shape) power_sum;
-            let nonzero = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let nonzero = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_nonzero_count_scalar F) @(r, s) absolute;
             let zero_norm = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) nonzero;
@@ -5404,7 +5429,7 @@ anx lam vector_norm (F: Floating)
                 (F#A#eq (p, pos_inf), max_norm, finite_or_zero);
             let reduced = core.select @«out_shape; F#A#R#T»
                 (F#A#eq (p, F#neg_inf), min_norm, with_pos_inf);
-            let kept = tensor.reshape_impl @(F#A#R#T, out_rank, r)
+            let kept = tensor.reshape @(F#A#R#T, out_rank, r)
                 out_shape (torch_multi_keepdim_shape (s, dims)) reduced;
             (reduced, kept)#keepdim;
     end;
@@ -5412,13 +5437,13 @@ anx lam vector_norm (F: Floating)
 anx lam norm2_all (F: Floating)
                             {r: Nat, s: «r; Nat»}
                             (input: «s; F#A#R#T»): F#A#R#T =
-    let squared = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let squared = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_square_scalar F#A) @(r, s) input;
     F#sqrt (torch_sum_all_runtime F#A @(r, s) squared);
 
 anx lam sum_typed_all (D: Reduction)
     {r: Nat, s: «r; Nat»} (input: «s; D#Input»): D#Output =
-    let converted = tensor.unary_impl @(D#Input, D#Output)
+    let converted = tensor.unary @(D#Input, D#Output)
         D#cast @(r, s) input;
     torch_reduce_all_runtime (D#add, D#zero) @(r, s) converted;
 
@@ -5452,8 +5477,8 @@ anx lam var_mean_all (F: Floating)
     (input: «s; F#A#R#T»): [Bool, F#A#R#T, F#A#R#T] =
     let n = torch_numel s;
     let count = F#from_nat n;
-    let flat = tensor.reshape_impl @(F#A#R#T, r, 1) s (n,) input;
-    let values = ‹i: n; tensor.get ((i,), flat)›;
+    let flat = tensor.reshape @(F#A#R#T, r, 1) s (n,) input;
+    let values = ‹i: n; flat#(i,)›;
     let sum = vec.fold.l F#A#R#add (F#A#R#_0, values);
     let arithmetic_mean = F#A#div (sum, count);
     let nonfinite_count = vec.fold.l F#A#R#add
@@ -5480,7 +5505,7 @@ anx lam var_mean_singletons (F: Floating)
     let denominator = F#A#maximum (
         F#A#sub (one, correction), F#A#R#_0);
     let singleton_variance = F#A#div (F#A#R#_0, denominator);
-    let variance = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let variance = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_constant_scalar F#A singleton_variance) @(r, s) input;
     (ff, variance, input);
 
@@ -5527,7 +5552,7 @@ anx lam mean_dims (F: Floating)
             let reduced = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) input;
             let count = F#from_nat (torch_reduction_numel (s, dims));
-            tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count)
                 @(torch_reduced_rank dims, torch_multi_reduce_shape (s, dims))
                 reduced;
@@ -5552,11 +5577,11 @@ anx lam mean_dims_keepdim
             let reduced = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) input;
             let count = F#from_nat (torch_reduction_numel (s, dims));
-            let mean = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let mean = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count)
                 @(torch_reduced_rank dims, torch_multi_reduce_shape (s, dims))
                 reduced;
-            tensor.reshape_impl
+            tensor.reshape
                 @(F#A#R#T, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims))
@@ -5577,11 +5602,11 @@ anx lam mean (F: Floating)
             let sums = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) input;
             let count = F#from_nat (torch_reduction_numel (s, dims));
-            let reduced = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let reduced = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count)
                 @(torch_reduced_rank dims, torch_multi_reduce_shape (s, dims))
                 sums;
-            let kept = tensor.reshape_impl
+            let kept = tensor.reshape
                 @(F#A#R#T, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims)) reduced;
@@ -5607,7 +5632,7 @@ anx lam amax (F: Floating)
                 lam reduce() =
                     let reduced = torch_multi_reduce
                         (F#A#maximum, F#neg_inf) (s, dims) input;
-                    let kept = tensor.reshape_impl
+                    let kept = tensor.reshape
                         @(F#A#R#T, torch_reduced_rank dims, r)
                         (torch_multi_reduce_shape (s, dims))
                         (torch_multi_keepdim_shape (s, dims)) reduced;
@@ -5637,27 +5662,27 @@ anx lam var_mean_dims
             let sum = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) input;
             let count = F#from_nat (torch_reduction_numel (s, dims));
-            let arithmetic_mean = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let arithmetic_mean = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count)
                 @(torch_reduced_rank dims, s_out) sum;
-            let nonfinite = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let nonfinite = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_nonfinite_count_scalar F) @(r, s) input;
             let nonfinite_count = torch_multi_reduce
                 (F#A#R#add, F#A#R#_0) (s, dims) nonfinite;
-            let mean = tensor.binary_impl
+            let mean = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 (torch_var_mean_adjust_mean F)
                 @(torch_reduced_rank dims, s_out)
                 (arithmetic_mean, nonfinite_count);
             // Two-pass centered variance avoids the cancellation in
             // E[x^2] - E[x]^2 for large-offset inputs.
-            let mean_b = tensor.broadcast_in_dim_impl
+            let mean_b = tensor.broadcast_in_dim
                 @(F#A#R#T, torch_reduced_rank dims, r)
                 (s_out, s, mean, torch_kept_axes dims);
-            let centered = tensor.binary_impl
+            let centered = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#sub @(r, s) (input, mean_b);
-            let squared_centered = tensor.unary_impl
+            let squared_centered = tensor.unary
                 @(F#A#R#T, F#A#R#T)
                 (torch_square_scalar F#A) @(r, s) centered;
             let centered_sum_sq = torch_multi_reduce
@@ -5666,7 +5691,7 @@ anx lam var_mean_dims
             // division then produces NaN or Inf instead of a runtime error.
             let denominator = F#A#maximum (
                 F#A#sub (count, correction), F#A#R#_0);
-            let variance = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let variance = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A denominator)
                 @(torch_reduced_rank dims, s_out) centered_sum_sq;
             // The heterogeneous tag prevents `[variance, mean]` from
@@ -5685,10 +5710,10 @@ anx lam var_mean (F: Floating)
     let kept_shape = torch_multi_keepdim_shape (s, dims);
     let variance = reduced_pair#1_3;
     let mean = reduced_pair#2_3;
-    let variance_kept = tensor.reshape_impl
+    let variance_kept = tensor.reshape
         @(F#A#R#T, torch_reduced_rank dims, r)
         reduced_shape kept_shape variance;
-    let mean_kept = tensor.reshape_impl
+    let mean_kept = tensor.reshape
         @(F#A#R#T, torch_reduced_rank dims, r)
         reduced_shape kept_shape mean;
     (ff, (variance, variance_kept)#keepdim, (mean, mean_kept)#keepdim);
@@ -5757,7 +5782,7 @@ anx lam logsumexp_dims_keepdim (F: Floating)
             let dims = torch_canonical_dims @(r, nr) dimensions;
             let reduced = torch_logsumexp_dims F
                 @(r, nr, s) dimensions input;
-            tensor.reshape_impl
+            tensor.reshape
                 @(F#A#R#T, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims))
@@ -5777,7 +5802,7 @@ anx lam logsumexp (F: Floating)
             let dims = torch_canonical_dims @(r, nr) dimensions;
             let reduced = torch_logsumexp_dims F
                 @(r, nr, s) dimensions input;
-            let kept = tensor.reshape_impl
+            let kept = tensor.reshape
                 @(F#A#R#T, torch_reduced_rank dims, r)
                 (torch_multi_reduce_shape (s, dims))
                 (torch_multi_keepdim_shape (s, dims)) reduced;
@@ -5810,11 +5835,11 @@ lam torch_batch_norm_stats (F: Floating)
             // symbolic multi-axis reduction leaves exactly the channel axis.
             let permutation = ‹d: r;
                 core.idx 0 r  ((torch_reduce_subscripts @r channel_dim)#d)›;
-            let transposed_shape = tensor.transpose_shape (s, permutation);
-            let transposed = tensor.transpose_impl @(F#A#R#T, r)
+            let transposed_shape = torch_transpose_shape (s, permutation);
+            let transposed = tensor.transpose @(F#A#R#T, r)
                 permutation input;
             let examples = torch_numel (torch_reduce_shape (s, channel_dim));
-            let flat = tensor.reshape_impl @(F#A#R#T, r, 2)
+            let flat = tensor.reshape @(F#A#R#T, r, 2)
                 transposed_shape (examples, channels) transposed;
             let pair = reduction_impl.var_mean_dims F
                 @(2, 1, (examples, channels))
@@ -5863,34 +5888,34 @@ anx lam native_layer_norm
             let outer = torch_numel batch_shape;
             let inner = torch_numel normalized_shape;
             let flat_shape = (outer, inner);
-            let flat_input = tensor.reshape_impl
+            let flat_input = tensor.reshape
                 @(F#A#R#T, rb + rn, 2)
                 full_shape flat_shape input;
             let reduction_dim = 1_2;
             let sum = torch_reduce_dim
                 (F#A#R#add, F#A#R#_0) (flat_shape, reduction_dim) flat_input;
             let count = F#from_nat inner;
-            let mean = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let mean = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count) @(1, (outer,)) sum;
             let mean_b = torch_broadcast_reduced @(F#A#R#T, 2)
                 (flat_shape, reduction_dim) mean;
-            let centered = tensor.binary_impl
+            let centered = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#sub @(2, flat_shape) (flat_input, mean_b);
-            let squared = tensor.binary_impl
+            let squared = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#mul @(2, flat_shape) (centered, centered);
             let variance_sum = torch_reduce_dim
                 (F#A#R#add, F#A#R#_0) (flat_shape, reduction_dim) squared;
-            let variance = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let variance = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_div_scalar F#A count) @(1, (outer,)) variance_sum;
-            let variance_eps = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let variance_eps = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_add_scalar F#A eps) @(1, (outer,)) variance;
-            let rstd = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let rstd = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_rsqrt_scalar F) @(1, (outer,)) variance_eps;
             let rstd_b = torch_broadcast_reduced @(F#A#R#T, 2)
                 (flat_shape, reduction_dim) rstd;
-            let normalized = tensor.binary_impl
+            let normalized = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#mul @(2, flat_shape) (centered, rstd_b);
             // Keep tensor-valued Options out of branch functions. The option
@@ -5898,32 +5923,32 @@ anx lam native_layer_norm
             let default_weight = tensor.splat @(F#A#R#T, rn)
                 (normalized_shape, F#from_nat 1);
             let effective_weight = option.unwrap_or weight default_weight;
-            let flat_weight = tensor.reshape_impl
+            let flat_weight = tensor.reshape
                 @(F#A#R#T, rn, 1) normalized_shape (inner,) effective_weight;
-            let weight_b = tensor.broadcast_in_dim_impl
+            let weight_b = tensor.broadcast_in_dim
                 @(F#A#R#T, 1, 2)
                 ((inner,), flat_shape, flat_weight, (1_2,));
-            let scaled = tensor.binary_impl
+            let scaled = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#mul @(2, flat_shape) (normalized, weight_b);
             let default_bias = tensor.splat @(F#A#R#T, rn)
                 (normalized_shape, F#A#R#_0);
             let effective_bias = option.unwrap_or bias default_bias;
-            let flat_bias = tensor.reshape_impl
+            let flat_bias = tensor.reshape
                 @(F#A#R#T, rn, 1) normalized_shape (inner,) effective_bias;
-            let bias_b = tensor.broadcast_in_dim_impl
+            let bias_b = tensor.broadcast_in_dim
                 @(F#A#R#T, 1, 2)
                 ((inner,), flat_shape, flat_bias, (1_2,));
-            let shifted = tensor.binary_impl
+            let shifted = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#add @(2, flat_shape) (scaled, bias_b);
-            let output = tensor.reshape_impl
+            let output = tensor.reshape
                 @(F#A#R#T, 2, rb + rn)
                 flat_shape full_shape shifted;
-            let mean_out = tensor.reshape_impl
+            let mean_out = tensor.reshape
                 @(F#A#R#T, 1, rb + rn)
                 (outer,) stat_shape mean;
-            let rstd_out = tensor.reshape_impl
+            let rstd_out = tensor.reshape
                 @(F#A#R#T, 1, rb + rn)
                 (outer,) stat_shape rstd;
             (output, mean_out, rstd_out);
@@ -5951,7 +5976,7 @@ anx lam group_norm
             let normalized_shape = torch_group_norm_suffix (s, groups);
             let grouped_shape = vec.cat (batch_shape, normalized_shape);
             let grouped_rank = 2 + (r - 1);
-            let grouped = tensor.reshape_impl
+            let grouped = tensor.reshape
                 @(F#A#R#T, r, grouped_rank)
                 s grouped_shape input;
             let stats = native_layer_norm F
@@ -5959,7 +5984,7 @@ anx lam group_norm
                 (batch_shape, normalized_shape) grouped
                 ((option.none @«normalized_shape; F#A#R#T»),
                  (option.none @«normalized_shape; F#A#R#T»)) eps;
-            let normalized = tensor.reshape_impl
+            let normalized = tensor.reshape
                 @(F#A#R#T, grouped_rank, r)
                 grouped_shape s stats#0_3;
             let effective_weight = option.unwrap_or
@@ -5967,14 +5992,14 @@ anx lam group_norm
             let effective_bias = option.unwrap_or
                 bias ‹channels; F#A#R#_0›;
             let channel_dim = torch_channel_dim @r;
-            let weight_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let weight_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 ((channels,), s, effective_weight, (channel_dim,));
-            let bias_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let bias_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 ((channels,), s, effective_bias, (channel_dim,));
-            let scaled = tensor.binary_impl
+            let scaled = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#mul @(r, s) (normalized, weight_b);
-            tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+            tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#add @(r, s) (scaled, bias_b);
     end;
 
@@ -5992,18 +6017,18 @@ anx lam batch_norm_inference
         lam body(): «s; F#A#R#T» =
             let channel_dim = torch_channel_dim @r;
             let channels = s#channel_dim;
-            let variance_eps = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let variance_eps = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_add_scalar F#A eps) @(1, (channels,)) running_var;
-            let rstd = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let rstd = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_rsqrt_scalar F) @(1, (channels,)) variance_eps;
-            let mean_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let mean_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 (channels, s, running_mean, (channel_dim,));
-            let rstd_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let rstd_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 (channels, s, rstd, (channel_dim,));
-            let centered = tensor.binary_impl
+            let centered = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#sub @(r, s) (input, mean_b);
-            let normalized = tensor.binary_impl
+            let normalized = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#mul @(r, s) (centered, rstd_b);
             // Avoid tensor-typed branch functions: the option variant is a
@@ -6012,14 +6037,14 @@ anx lam batch_norm_inference
                 weight ‹channels; F#from_nat 1›;
             let effective_bias = option.unwrap_or
                 bias ‹channels; F#A#R#_0›;
-            let weight_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let weight_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 (channels, s, effective_weight, (channel_dim,));
-            let bias_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let bias_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 (channels, s, effective_bias, (channel_dim,));
-            let scaled = tensor.binary_impl
+            let scaled = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#mul @(r, s) (normalized, weight_b);
-            tensor.binary_impl @(F#A#R#T, F#A#R#T, F#A#R#T)
+            tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#add @(r, s) (scaled, bias_b);
     end;
 
@@ -6056,9 +6081,9 @@ anx lam native_batch_norm (F: Floating)
             let mean = stats#1_3;
             let variance = stats#2_3;
             let channels = s#(torch_channel_dim @r);
-            let variance_eps = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let variance_eps = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_add_scalar F#A eps) @(1, (channels,)) variance;
-            let invstd = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let invstd = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_rsqrt_scalar F) @(1, (channels,)) variance_eps;
             let output = torch_batch_norm_apply F @(r, s)
                 (input, weight, bias, mean, variance, eps);
@@ -6106,37 +6131,37 @@ anx lam native_batch_norm_functional
             let mean = stats#1_3;
             let variance = stats#2_3;
             let channels = s#(torch_channel_dim @r);
-            let variance_eps = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let variance_eps = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_add_scalar F#A eps) @(1, (channels,)) variance;
-            let invstd = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let invstd = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_rsqrt_scalar F) @(1, (channels,)) variance_eps;
             let output = torch_batch_norm_apply F @(r, s)
                 (input, weight, bias, mean, variance, eps);
             let retained = F#A#sub (F#from_nat 1, momentum);
-            let old_mean = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let old_mean = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_scale_scalar F#A retained)
                 @(1, (channels,)) running_mean;
-            let batch_mean = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+            let batch_mean = tensor.unary @(F#A#R#T, F#A#R#T)
                 (torch_scale_scalar F#A momentum) @(1, (channels,)) mean;
-            let updated_mean = tensor.binary_impl
+            let updated_mean = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#add @(1, (channels,)) (old_mean, batch_mean);
             let unbiased_scale = F#A#div (
                 F#from_nat examples,
                 F#from_nat (examples - 1));
-            let unbiased_variance = tensor.unary_impl
+            let unbiased_variance = tensor.unary
                 @(F#A#R#T, F#A#R#T)
                 (torch_scale_scalar F#A unbiased_scale)
                 @(1, (channels,)) variance;
-            let old_variance = tensor.unary_impl
+            let old_variance = tensor.unary
                 @(F#A#R#T, F#A#R#T)
                 (torch_scale_scalar F#A retained)
                 @(1, (channels,)) running_var;
-            let batch_variance = tensor.unary_impl
+            let batch_variance = tensor.unary
                 @(F#A#R#T, F#A#R#T)
                 (torch_scale_scalar F#A momentum)
                 @(1, (channels,)) unbiased_variance;
-            let updated_variance = tensor.binary_impl
+            let updated_variance = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#add @(1, (channels,))
                 (old_variance, batch_variance);
@@ -6233,35 +6258,35 @@ anx lam native_group_norm
              «n, groups; F#A#R#T»] =
             let channels_per_group = channels / groups;
             let grouped_shape = (n, groups, channels_per_group, inner);
-            let grouped = tensor.reshape_impl @(F#A#R#T, r, 4)
+            let grouped = tensor.reshape @(F#A#R#T, r, 4)
                 s grouped_shape input;
             let stats = native_layer_norm F
                 @(2, 2) ((n, groups), (channels_per_group, inner)) grouped
                 ((option.none @«channels_per_group, inner; F#A#R#T»),
                  (option.none @«channels_per_group, inner; F#A#R#T»)) eps;
-            let normalized = tensor.reshape_impl @(F#A#R#T, 4, r)
+            let normalized = tensor.reshape @(F#A#R#T, 4, r)
                 grouped_shape s stats#0_3;
             let actual_channels = s#(torch_channel_dim @r);
             let effective_weight = option.unwrap_or
                 weight ‹actual_channels; F#from_nat 1›;
             let effective_bias = option.unwrap_or
                 bias ‹actual_channels; F#A#R#_0›;
-            let weight_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let weight_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 ((actual_channels,), s, effective_weight,
                  (torch_channel_dim @r,));
-            let bias_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+            let bias_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
                 ((actual_channels,), s, effective_bias,
                  (torch_channel_dim @r,));
-            let scaled = tensor.binary_impl
+            let scaled = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#mul @(r, s) (normalized, weight_b);
-            let output = tensor.binary_impl
+            let output = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#R#add @(r, s) (scaled, bias_b);
             let stat_shape = (n, groups, 1, 1);
-            let mean = tensor.reshape_impl @(F#A#R#T, 4, 2)
+            let mean = tensor.reshape @(F#A#R#T, 4, 2)
                 stat_shape (n, groups) stats#1_3;
-            let rstd = tensor.reshape_impl @(F#A#R#T, 4, 2)
+            let rstd = tensor.reshape @(F#A#R#T, 4, 2)
                 stat_shape (n, groups) stats#2_3;
             (output, mean, rstd);
     end;
@@ -6288,14 +6313,14 @@ lam torch_cross_entropy_index_components (F: Floating)
         @(r, s) (core.bitcast I64 class_dim, ff) input;
     let permutation = ‹d: r;
         core.idx 0 r  ((torch_reduce_subscripts @r class_dim)#d)›;
-    let class_last = tensor.transpose_impl @(F#A#R#T, r)
+    let class_last = tensor.transpose @(F#A#R#T, r)
         permutation log_probs;
-    let flat_log_probs = tensor.reshape_impl @(F#A#R#T, r, 2)
-        (tensor.transpose_shape (s, permutation)) (examples, classes) class_last;
-    let flat_target = tensor.reshape_impl
+    let flat_log_probs = tensor.reshape @(F#A#R#T, r, 2)
+        (torch_transpose_shape (s, permutation)) (examples, classes) class_last;
+    let flat_target = tensor.reshape
         @(I64, r - 1, 1)
         loss_shape (examples,) target;
-    let safe_target = tensor.unary_impl @(I64, I64)
+    let safe_target = tensor.unary @(I64, I64)
         (torch_cross_entropy_safe_target ignore_index)
         @(1, (examples,)) flat_target;
     // Validate class indices once, then share the bounded tensor between the
@@ -6303,12 +6328,12 @@ lam torch_cross_entropy_index_components (F: Floating)
     let checked_target = torch_checked_index_cast
         @(classes, 1, (examples,))
         "cross_entropy target out of range" safe_target;
-    let checked_target_2d = tensor.reshape_impl @(Idx classes, 1, 2)
+    let checked_target_2d = tensor.reshape @(Idx classes, 1, 2)
         (examples,) (examples, 1) checked_target;
     let selected_2d = tensor.gather @(F#A#R#T, 2)
         ((examples, classes), (examples, 1)) 1_2
         (flat_log_probs, checked_target_2d);
-    let selected = tensor.reshape_impl @(F#A#R#T, 2, 1)
+    let selected = tensor.reshape @(F#A#R#T, 2, 1)
         (examples, 1) (examples,) selected_2d;
     let effective_weight = option.unwrap_or
         weight ‹classes; F#from_nat 1›;
@@ -6320,40 +6345,40 @@ lam torch_cross_entropy_index_components (F: Floating)
                 ((classes,), (examples,)) 0_1
                 (actual_weight, checked_target)
         | _: [] => ‹examples; F#from_nat 1›;
-    let weighted_selected = tensor.binary_impl
+    let weighted_selected = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#mul @(1, (examples,)) (selected, selected_weight);
-    let nll_unmasked = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let nll_unmasked = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_neg_scalar F#A) @(1, (examples,)) weighted_selected;
-    let nll = tensor.binary_impl @(I64, F#A#R#T, F#A#R#T)
+    let nll = tensor.binary @(I64, F#A#R#T, F#A#R#T)
         (torch_cross_entropy_mask_value F#A ignore_index)
         @(1, (examples,)) (flat_target, nll_unmasked);
-    let weight_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, 2)
+    let weight_b = tensor.broadcast_in_dim @(F#A#R#T, 1, 2)
         ((classes,), (examples, classes), effective_weight, (1_2,));
-    let weighted_logs = tensor.binary_impl
+    let weighted_logs = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#mul @(2, (examples, classes)) (flat_log_probs, weight_b);
     let smooth_sum = torch_reduce_dim
         (F#A#R#add, F#A#R#_0) ((examples, classes), 1_2) weighted_logs;
-    let smooth_negative = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let smooth_negative = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_neg_scalar F#A) @(1, (examples,)) smooth_sum;
-    let smooth = tensor.binary_impl @(I64, F#A#R#T, F#A#R#T)
+    let smooth = tensor.binary @(I64, F#A#R#T, F#A#R#T)
         (torch_cross_entropy_mask_value F#A ignore_index)
         @(1, (examples,)) (flat_target, smooth_negative);
     let one_minus = F#A#sub (F#from_nat 1, label_smoothing);
     let smoothing_per_class = F#A#div (label_smoothing, F#from_nat classes);
-    let nll_scaled = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let nll_scaled = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_scale_scalar F#A one_minus) @(1, (examples,)) nll;
-    let smooth_scaled = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let smooth_scaled = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_scale_scalar F#A smoothing_per_class)
         @(1, (examples,)) smooth;
-    let flat_loss = tensor.binary_impl
+    let flat_loss = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#add @(1, (examples,)) (nll_scaled, smooth_scaled);
-    let loss = tensor.reshape_impl
+    let loss = tensor.reshape
         @(F#A#R#T, 1, r - 1)
         (examples,) loss_shape flat_loss;
-    let denominator_values = tensor.binary_impl
+    let denominator_values = tensor.binary
         @(I64, F#A#R#T, F#A#R#T)
         (torch_cross_entropy_mask_value F#A ignore_index)
         @(1, (examples,)) (flat_target, selected_weight);
@@ -6379,20 +6404,20 @@ lam torch_cross_entropy_probability_components (F: Floating)
         @(r, s) (core.bitcast I64 class_dim, ff) input;
     let one_minus = F#A#sub (F#from_nat 1, label_smoothing);
     let smoothing_per_class = F#A#div (label_smoothing, F#from_nat classes);
-    let smoothed_target = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let smoothed_target = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_cross_entropy_smooth_target F
             (one_minus, smoothing_per_class)) @(r, s) target;
     let effective_weight = option.unwrap_or
         weight ‹classes; F#from_nat 1›;
-    let weight_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, r)
+    let weight_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
         ((classes,), s, effective_weight, (class_dim,));
-    let target_logs = tensor.binary_impl
+    let target_logs = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#mul @(r, s) (smoothed_target, log_probs);
-    let weighted_logs = tensor.binary_impl
+    let weighted_logs = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#mul @(r, s) (target_logs, weight_b);
-    let weighted_terms = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let weighted_terms = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_neg_scalar F#A) @(r, s) weighted_logs;
     let loss = torch_reduce_dim
         (F#A#R#add, F#A#R#_0) (s, class_dim) weighted_terms;
@@ -6469,7 +6494,7 @@ anx lam smooth_l1_mean (F: Floating)
                               {r: Nat, s: «r; Nat»}
                               (input: «s; F#A#R#T», target: «s; F#A#R#T»)
                               (beta: F#A#R#T): F#A#R#T =
-    let losses = tensor.binary_impl
+    let losses = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         (torch_smooth_l1_scalar F beta) @(r, s) (input, target);
     reduction_impl.mean_all F @(r, s) losses;
@@ -6508,7 +6533,7 @@ anx lam kl_div_reduced (F: Floating)
         body
     where
         lam body(): F#A#R#T =
-            let losses = tensor.binary_impl
+            let losses = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 (torch_kl_div_scalar F log_target) @(r, s) (input, target);
             let total = torch_sum_all_runtime F#A @(r, s) losses;
@@ -6558,12 +6583,12 @@ anx lam triplet_margin_reduced (F: Floating)
                 @(n, d) (eps, p) (anchor, negative);
             let distance_swap = torch_pairwise_distance_2d F
                 @(n, d) (eps, p) (positive, negative);
-            let swapped_negative = tensor.binary_impl
+            let swapped_negative = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 F#A#minimum @(1, (n,)) (distance_negative, distance_swap);
             let effective_negative = core.select @«n; F#A#R#T»
                 (swap, swapped_negative, distance_negative);
-            let losses = tensor.binary_impl
+            let losses = tensor.binary
                 @(F#A#R#T, F#A#R#T, F#A#R#T)
                 (torch_triplet_margin_scalar F margin)
                 @(1, (n,)) (distance_positive, effective_negative);
@@ -6589,7 +6614,7 @@ anx lam triplet_margin_loss (F: Floating)
         (valid, "triplet_margin_loss expects rank >= 1, margin>0, and a valid reduction")
         (torch_triplet_margin_pointwise F
             @(r, s) (anchor, positive, negative) (margin, p, eps, swap));
-    let unreduced = tensor.reshape_impl
+    let unreduced = tensor.reshape
         @(F#A#R#T, 1, r - 1)
         (n,) loss_shape losses;
     let total = torch_sum_all_runtime F#A @(1, (n,)) losses;
@@ -6627,14 +6652,14 @@ anx lam cross_entropy_mean_2d (F: Floating)
     (input: «n, c; F#A#R#T», target: «n; I64»): F#A#R#T =
     let log_probs = normalization.log_softmax F
         @(2, (n, c)) (1I64, ff) input;
-    let target_2d = tensor.reshape_impl @(I64, 1, 2)
+    let target_2d = tensor.reshape @(I64, 1, 2)
         (n,) (n, 1) target;
     let selected_2d = indexing.gather
         @(F#A#R#T, 2, (n, c), (n, 1))
         1I64 (log_probs, target_2d);
-    let selected = tensor.reshape_impl @(F#A#R#T, 2, 1)
+    let selected = tensor.reshape @(F#A#R#T, 2, 1)
         (n, 1) (n,) selected_2d;
-    let losses = tensor.unary_impl @(F#A#R#T, F#A#R#T)
+    let losses = tensor.unary @(F#A#R#T, F#A#R#T)
         (torch_neg_scalar F#A) @(1, (n,)) selected;
     reduction.mean_all F @(1, (n,)) losses;
 
@@ -6671,7 +6696,7 @@ lam torch_prefix_shift_2d
         offset, 0)›;
     let hi = (0, 0);
     let padded = tensor.pad (m, n) (0, lo, hi) (input, identity);
-    tensor.map_reduce ((m, n), (m, n)) (tensor.tensor_copy, ⊥: T)
+    tensor.map_reduce ((m, n), (m, n)) (torch_tensor_copy, ⊥: T)
         (affine.id @2) (affine.id @2,) padded;
 
 /// Hillis-Steele prefix reduction. `extent`, `offset`, the selected axis and
@@ -6693,7 +6718,7 @@ lam torch_prefix_2d
                     let shifted = torch_prefix_shift_2d
                         @(T, m, n)
                         (identity, dimension, offset) current;
-                    let next = tensor.binary_impl @(T, T, T)
+                    let next = tensor.binary @(T, T, T)
                         combine @(2, (m, n)) (current, shifted);
                     loop (offset * 2, next);
                 lam done (): «m, n; T» = current;
@@ -6738,7 +6763,7 @@ lam torch_reverse_tail_add_2d (F: Floating)
     let extra = window - 1;
     let hi = ‹d: 2; core.select (
         core.icmp.e @2 (dimension, d), extra, 0)›;
-    let padded_shape = tensor.pad_shape ((0, 0), shape, hi);
+    let padded_shape = torch_pad_shape ((0, 0), shape, hi);
     let padded = tensor.pad shape (0, (0, 0), hi)
         (input, F#A#R#_0);
     let iteration_shape = (m, n, window);
@@ -6762,12 +6787,12 @@ lam torch_reverse_prefix_add_2d (F: Floating)
     let reduced_shape = torch_reduce_shape (shape, dimension);
     let total = torch_reduce_dim
         (F#A#R#add, F#A#R#_0) (shape, dimension) input;
-    let total_b = tensor.broadcast_in_dim_impl @(F#A#R#T, 1, 2)
+    let total_b = tensor.broadcast_in_dim @(F#A#R#T, 1, 2)
         (reduced_shape, shape, total, torch_kept_dims @2 dimension);
-    let tail = tensor.binary_impl
+    let tail = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#sub @(2, shape) (total_b, forward);
-    let algebraic = tensor.binary_impl
+    let algebraic = tensor.binary
         @(F#A#R#T, F#A#R#T, F#A#R#T)
         F#A#R#add @(2, shape) (tail, input);
     let extent = shape#dimension;
@@ -6777,7 +6802,7 @@ lam torch_reverse_prefix_add_2d (F: Floating)
         (torch_reverse_tail_mask_2d (dimension, threshold));
     let exact_tail = torch_reverse_tail_add_2d F @(m, n)
         dimension input;
-    tensor.select_impl @(F#A#R#T) @(2, shape)
+    tensor.select @(F#A#R#T) @(2, shape)
         (tail_mask, exact_tail, algebraic);
 
 pub mod scan {
@@ -6876,7 +6901,7 @@ anx lam cumsum_bool_i64 {m n: Nat}
          "cumsum expects an in-range dimension") body
     where
         lam body(): «m, n; I64» =
-            let converted = tensor.unary_impl @(Bool, I64)
+            let converted = tensor.unary @(Bool, I64)
                 torch_bool_to_i64 @(2, (m, n)) input;
             torch_prefix_2d @(I64, m, n)
                 (torch_i64_add, 0I64,
@@ -6911,14 +6936,14 @@ lam torch_flip_element {T: *, r nr: Nat}
             core.wrap.sub 0 (last, indices#d),
             indices#d);
         core.conv.u (s#d) coordinate›;
-    tensor.get (coords, input);
+    input#coords;
 
 pub mod indexing_impl {
 anx lam slice {T: *, r: Nat}
                          (s_in: «r; Nat», start: «r; Nat»,
                           step: «r; Nat», s_out: «r; Nat»)
                          (input: «s_in; T»): «s_out; T» =
-    tensor.slice_impl @(T, r) s_in (start, step, s_out) input;
+    tensor.slice @(T, r) s_in (start, step, s_out) input;
 
 anx lam select {T: *, r: Nat, s: «r; Nat»}
                           (dimension: I64, index: I64)
@@ -6937,9 +6962,9 @@ anx lam select {T: *, r: Nat, s: «r; Nat»}
                 core.select (core.icmp.e @r (d, dim), selected, 0)›;
             let step = ‹d: r; 1›;
             let sliced_shape = torch_keepdim_shape (s, dim);
-            let sliced = tensor.slice_impl @(T, r)
+            let sliced = tensor.slice @(T, r)
                 s (start, step, sliced_shape) input;
-            tensor.reshape_impl @(T, r, r - 1)
+            tensor.reshape @(T, r, r - 1)
                 sliced_shape (torch_reduce_shape (s, dim)) sliced;
     end;
 
@@ -6954,7 +6979,7 @@ anx lam roll {T: *, r nr: Nat, s: «r; Nat»}
         lam body(): «s; T» =
             let dims = torch_canonical_dims @(r, nr) dimensions;
             tensor.map_reduce @1 @(T, r, r) (s, s)
-                @(T, r, s) (tensor.tensor_copy @T, ⊥: T)
+                @(T, r, s) (torch_tensor_copy @T, ⊥: T)
                 (affine.id @r) (torch_roll_map (s, shifts, dims),) input;
     end;
 
@@ -6986,7 +7011,7 @@ anx lam unfold {T: *, r: Nat, s: «r; Nat»}
             let out_rank = r + 1;
             tensor.map_reduce @1 @(T, out_rank, out_rank)
                 (out_shape, out_shape) @(T, r, s)
-                (tensor.tensor_copy @T, ⊥: T) (affine.id @out_rank)
+                (torch_tensor_copy @T, ⊥: T) (affine.id @out_rank)
                 (torch_unfold_map @r (dim, step),) input;
     end;
 
@@ -7012,7 +7037,7 @@ anx lam narrow {T: *, r: Nat, s: «r; Nat»}
                 core.select (core.icmp.e @r (d, dim), canonical_start, 0)›;
             let steps = ‹d: r; 1›;
             let s_out = torch_narrow_shape (s, dim, length);
-            tensor.slice_impl @(T, r) s (starts, steps, s_out) input;
+            tensor.slice @(T, r) s (starts, steps, s_out) input;
     end;
 
 anx lam gather {T: *, r: Nat, s_input s_index: «r; Nat»}
@@ -7100,9 +7125,9 @@ anx lam embedding {T: *, vocab hidden ri: Nat}
     let index_dims = ‹d: ri; core.idx 0 ro  (core.bitcast Nat d)›;
     let checked_indices = torch_checked_index_cast
         @(vocab, ri, s_indices) "embedding index out of range" indices;
-    let broadcast_weight = tensor.broadcast_in_dim_impl @(T, 2, ro)
+    let broadcast_weight = tensor.broadcast_in_dim @(T, 2, ro)
         ((vocab, hidden), source_shape, weight, weight_dims);
-    let broadcast_indices = tensor.broadcast_in_dim_impl @(Idx vocab, ri, ro)
+    let broadcast_indices = tensor.broadcast_in_dim @(Idx vocab, ri, ro)
         (s_indices, s_out, checked_indices, index_dims);
     tensor.gather @(T, ro)
         (source_shape, s_out) gather_dim
@@ -7115,19 +7140,19 @@ anx lam index_2d {T: *, m n r: Nat, s: «r; Nat»}
     runtime.require (r > 0, "index_2d expects result rank >= 1") body
     where
         lam body(): «s; T» =
-            let linear_i64 = tensor.binary_impl @(I64, I64, I64)
+            let linear_i64 = tensor.binary @(I64, I64, I64)
                 (torch_linearize_2d_index @n) @(r, s) (rows, columns);
             let flat_size = m * n;
             let linear = torch_checked_index_cast
                 @(flat_size, r, s) "2-D index out of range" linear_i64;
-            let flat = tensor.reshape_impl @(T, 2, 1)
+            let flat = tensor.reshape @(T, 2, 1)
                 (m, n) (flat_size,) input;
             let source_shape = ‹d: r;
                 core.select (
                     core.icmp.e @r (d, core.idx 0 r  0),
                     flat_size,
                     s#d)›;
-            let source = tensor.broadcast_in_dim_impl @(T, 1, r)
+            let source = tensor.broadcast_in_dim @(T, 1, r)
                 ((flat_size,), source_shape, flat, (core.idx 0 r  0,));
             tensor.gather @(T, r)
                 (source_shape, s) (core.idx 0 r  0) (source, linear);

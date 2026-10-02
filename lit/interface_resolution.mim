@@ -10,6 +10,7 @@
 // CHECK-LABEL: extern fun exp_f64
 // CHECK: math.exp
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -33,5 +34,6 @@ extern fun exp_f64(input: «2, 3; math.F64»): «2, 3; math.F64» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

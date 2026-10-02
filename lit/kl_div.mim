@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch.loss --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -52,4 +53,4 @@ extern fun kl_batchmean(input: «2, 3; Nat», target: «2, 3; Nat»): Nat =
         @(2, (2, 3)) (ff, 2) (input, target));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

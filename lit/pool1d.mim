@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin option;
 plugin torch;
@@ -41,4 +42,4 @@ extern fun adaptive_avg_pool1d(input: «2, 3, 8; math.F32»)
 // CHECK: tensor.map_reduce
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

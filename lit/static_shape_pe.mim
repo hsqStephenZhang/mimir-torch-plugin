@@ -16,5 +16,6 @@ extern fun slice_identity(input: «2, 3; I32»): «2, 3; I32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

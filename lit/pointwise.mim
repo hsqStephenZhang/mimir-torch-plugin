@@ -4,6 +4,7 @@
 // CHECK-LABEL: extern fun pointwise
 // CHECK-COUNT-2: tensor.map_reduce
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -31,5 +32,6 @@ extern fun pointwise(lhs rhs: «2, 3; Nat»): «2, 3; Nat» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

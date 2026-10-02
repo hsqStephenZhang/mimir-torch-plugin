@@ -1,5 +1,6 @@
 // RUN: not %mim %s -o - 2>&1 | %FileCheck %s
 
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -10,5 +11,6 @@ extern lam static_failure(): Bool =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

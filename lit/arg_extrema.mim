@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match %s
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -47,4 +48,4 @@ extern fun min_dim(input: «2, 3; Nat»): [Bool, «2; Nat», «2; I64»] =
     return (torch.reduction.min_dim NatFloating @(2, (2, 3)) (-1I64) input);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

@@ -8,6 +8,7 @@
 // CHECK-LABEL: extern fun hardtanh
 // CHECK: tensor.map_reduce
 
+plugin tensor;
 plugin core;
 plugin option;
 plugin torch;
@@ -44,5 +45,6 @@ extern fun hardtanh(input: «2, 3; Nat»): «2, 3; Nat» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

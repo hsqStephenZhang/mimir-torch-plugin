@@ -4,6 +4,7 @@
 // CHECK-LABEL: extern fun addcmul_dynamic
 // CHECK: runtime.static_check
 
+plugin tensor;
 plugin math;
 plugin core;
 plugin torch;
@@ -22,5 +23,6 @@ extern fun addcmul_dynamic {a n m: Nat}(
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

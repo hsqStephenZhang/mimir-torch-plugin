@@ -4,6 +4,7 @@
 // CHECK-NOT: torch.activation.softplus
 // CHECK: tensor.map_reduce
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -13,4 +14,4 @@ extern fun mish(input: «2, 4; math.F32»): «2, 4; math.F32» =
         @(2, (2, 4)) input);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

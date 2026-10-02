@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch.loss --implicit-check-not=torch.normalization \
 // RUN:   --implicit-check-not=torch.indexing --implicit-check-not=Match
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -39,4 +40,4 @@ extern fun cross_entropy(input: «2, 4; Nat», target: «2; I64»): Nat =
         @(2, 4) (input, target));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

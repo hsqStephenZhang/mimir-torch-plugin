@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -17,5 +18,6 @@ extern fun masked_fill_broadcast(
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

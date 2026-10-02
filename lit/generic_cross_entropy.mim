@@ -3,6 +3,7 @@
 // RUN:   --implicit-check-not=torch.normalization \
 // RUN:   --implicit-check-not=torch.indexing --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin option;
 plugin torch;
@@ -49,4 +50,4 @@ extern fun cross_entropy_unbatched_none(
 // CHECK: tensor.gather
 // CHECK: tensor.map_reduce
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

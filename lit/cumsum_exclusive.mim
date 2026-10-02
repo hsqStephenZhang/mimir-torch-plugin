@@ -1,5 +1,6 @@
 // RUN: %mim %s -o - | %FileCheck %s --implicit-check-not=torch.scan
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin runtime;
@@ -16,4 +17,4 @@ extern lam cumsum_exclusive(input: «2, 4; math.F32»)
     torch.scan.cumsum_exclusive_2d F @(2, 4) 1I64 input;
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

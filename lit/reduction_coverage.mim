@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match %s
 
+plugin tensor;
 plugin math;
 plugin core;
 plugin torch;
@@ -91,5 +92,6 @@ extern fun all_dims(input: «2, 3, 4; Bool»): «3; Bool» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

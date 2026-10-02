@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match %s
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -39,5 +40,6 @@ extern fun sub_alpha(lhs rhs: «2; Nat»): «2; Nat» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

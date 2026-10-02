@@ -1,5 +1,6 @@
 // RUN: %mim %s -o - | %FileCheck %s --implicit-check-not=tensor.scan
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin runtime;
@@ -20,4 +21,4 @@ extern lam prefix_reductions(input: «2, 4; math.F32», mask: «2, 4; Bool»)
      torch.scan.cumsum_bool_i64 @(2, 4) 1I64 mask);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

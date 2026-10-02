@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin option;
 plugin torch;
@@ -67,4 +68,4 @@ extern fun native_batch_norm_functional(
         (tt, 0x3E800000:math.F32, 0x3727C5AC:math.F32));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

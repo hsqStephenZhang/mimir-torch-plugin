@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match %s
 
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -40,5 +41,6 @@ extern fun unsqueeze(input: «2, 3; I32»): «2, 1, 3; I32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

@@ -5,6 +5,7 @@
 // CHECK-DAG: math.cmp.uGlE
 // CHECK-DAG: math.cmp.Ugle
 
+plugin tensor;
 plugin math;
 plugin option;
 plugin torch;
@@ -18,5 +19,6 @@ extern fun clamp_min_f32(input: «4; math.F32»): «4; math.F32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

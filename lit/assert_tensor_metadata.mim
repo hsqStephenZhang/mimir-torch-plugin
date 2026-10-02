@@ -1,6 +1,7 @@
 // RUN: %mim %s -o - | %FileCheck %s
 // RUN: %mim %s --profile summary | %FileCheck %s --check-prefix=PROFILE
 
+plugin tensor;
 plugin torch;
 plugin runtime;
 plugin compile;
@@ -29,5 +30,6 @@ extern lam static_success(): Bool =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

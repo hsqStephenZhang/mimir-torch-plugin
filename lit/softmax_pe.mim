@@ -1,6 +1,7 @@
 // RUN: %mim %s -o - | %FileCheck %s --implicit-check-not=torch.
 // RUN: %mim %s --profile summary | %FileCheck %s --check-prefix=PROFILE
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -72,5 +73,6 @@ extern fun softmax_dynamic_dim(dimension: I64, input: «2, 4; Nat»): «2, 4; Na
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

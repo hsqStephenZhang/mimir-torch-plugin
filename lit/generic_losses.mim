@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -63,4 +64,4 @@ extern fun triplet_none_1d_scalar(
 
 // CHECK: tensor.map_reduce
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

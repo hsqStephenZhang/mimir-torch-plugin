@@ -8,6 +8,7 @@
 // CHECK-LABEL: extern fun mean_keepdim
 // CHECK: tensor.map_reduce
 
+plugin tensor;
 plugin core;
 plugin option;
 plugin torch;
@@ -54,5 +55,6 @@ extern fun batch_norm_without_affine(
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

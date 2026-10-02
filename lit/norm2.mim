@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match %s
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -21,4 +22,4 @@ extern fun norm2_all_keepdim(input: «2, 3; math.F32»): «1, 1; math.F32» =
         @(2, 2, (2, 3)) (0I64, 1I64) input);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

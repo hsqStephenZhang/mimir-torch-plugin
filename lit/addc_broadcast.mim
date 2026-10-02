@@ -6,6 +6,7 @@
 // CHECK-LABEL: extern fun addcmul_broadcast
 // CHECK-COUNT-6: tensor.map_reduce
 
+plugin tensor;
 plugin math;
 plugin core;
 plugin torch;
@@ -34,5 +35,6 @@ extern fun addcdiv_broadcast(
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

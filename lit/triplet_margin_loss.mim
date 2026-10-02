@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch.loss --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -48,4 +49,4 @@ extern fun triplet_sum_swap(anchor: «3, 5; Nat», positive: «3, 5; Nat»,
         @(3, 5) (1, 2, 1, tt, 0) (anchor, positive, negative));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

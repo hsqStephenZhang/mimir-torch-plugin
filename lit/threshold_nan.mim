@@ -4,6 +4,7 @@
 // CHECK-LABEL: extern fun threshold_f32
 // CHECK: math.cmp.ugLE
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -15,5 +16,6 @@ extern fun threshold_f32(input: «4; math.F32»): «4; math.F32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

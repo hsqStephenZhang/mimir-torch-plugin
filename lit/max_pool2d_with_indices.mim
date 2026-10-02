@@ -4,6 +4,7 @@
 // CHECK-NOT: torch.pool.max_pool2d
 // CHECK: tensor.map_reduce
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -17,4 +18,4 @@ extern fun max_pool2d_with_indices(input: «1, 1, 4, 5; math.F32»)
         input);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

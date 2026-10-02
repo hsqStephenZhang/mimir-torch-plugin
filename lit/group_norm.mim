@@ -1,5 +1,6 @@
 // RUN: %mim %s -o - | %FileCheck %s --implicit-check-not=torch.normalization. --implicit-check-not=Match
 
+plugin tensor;
 plugin core;
 plugin option;
 plugin torch;
@@ -51,5 +52,6 @@ extern fun instance_norm_no_affine(input: «2, 8, 3, 5; Nat»)
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

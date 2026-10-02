@@ -1,6 +1,7 @@
 // RUN: %mim %s -o - | %FileCheck %s
 // RUN: %mim %s --profile summary | %FileCheck %s --check-prefix=PROFILE
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -48,5 +49,6 @@ extern fun addmm_with_self(
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

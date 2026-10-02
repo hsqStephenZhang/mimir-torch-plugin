@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin core;
 plugin torch;
@@ -99,4 +100,4 @@ extern fun sum_i64_f32(input: «2, 3; I64»): «2; math.F32» =
         @(2, 1, (2, 3)) ((1I64,), ff) input);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

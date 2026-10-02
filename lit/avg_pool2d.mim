@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin option;
 plugin torch;
@@ -39,4 +40,4 @@ extern fun divisor_override(input: «1, 1, 3, 3; math.F32»)
         input);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

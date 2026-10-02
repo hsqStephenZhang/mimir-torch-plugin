@@ -8,6 +8,7 @@
 // CHECK: math.arith.mul
 // CHECK: math.arith.sub
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -23,5 +24,6 @@ extern fun sub_scalar_lhs(other: «4; math.F32»): «4; math.F32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

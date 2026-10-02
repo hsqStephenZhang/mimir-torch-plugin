@@ -1,5 +1,6 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s --implicit-check-not=torch.loss --implicit-check-not=Match
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -36,4 +37,4 @@ extern fun smooth_l1(input: «17, 19; Nat», target: «17, 19; Nat»): Nat =
         @(2, (17, 19)) (input, target) 1);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

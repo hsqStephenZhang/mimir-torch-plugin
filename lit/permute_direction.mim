@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match
 
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -16,5 +17,6 @@ extern fun permute_rank3(input: «2, 3, 4; I32»): «4, 2, 3; I32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

@@ -28,5 +28,6 @@ extern fun qwen_api_ops (
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.static_check
 // RUN: %mim -p opt %s --profile summary | %FileCheck %s --check-prefix=PROFILE
 
+plugin tensor;
 plugin core;
 plugin option;
 plugin torch;
@@ -38,5 +39,6 @@ extern fun convolution1d_stride(
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

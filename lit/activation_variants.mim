@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match %s
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -33,5 +34,6 @@ extern fun softplus(input: «2, 4; math.F32»): «2, 4; math.F32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

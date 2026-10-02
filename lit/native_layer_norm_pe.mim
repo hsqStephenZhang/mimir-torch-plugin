@@ -1,6 +1,7 @@
 // RUN: %mim %s -o - | %FileCheck %s --implicit-check-not=Match
 // RUN: %mim %s --profile summary | %FileCheck %s --check-prefix=PROFILE
 
+plugin tensor;
 plugin core;
 plugin vec;
 plugin option;
@@ -88,5 +89,6 @@ extern fun layer_norm_dynamic {rn: Nat}
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

@@ -6,6 +6,7 @@
 // CHECK-LABEL: extern fun minimum_f64
 // CHECK: math.extrema.Im
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -21,5 +22,6 @@ extern fun minimum_f64(lhs rhs: «2; math.F64»): «2; math.F64» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

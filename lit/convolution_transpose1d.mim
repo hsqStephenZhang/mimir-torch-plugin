@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.static_check
 
+plugin tensor;
 plugin core;
 plugin option;
 plugin torch;
@@ -35,5 +36,6 @@ extern fun convolution_transpose1d(
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

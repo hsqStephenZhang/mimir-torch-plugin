@@ -1,6 +1,7 @@
 // RUN: %mim %s -o - | %FileCheck %s --implicit-check-not=torch.
 // RUN: %mim %s --profile summary | %FileCheck %s --check-prefix=PROFILE
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -27,5 +28,6 @@ extern fun gelu_tanh(input: «2, 4; math.F32»): «2, 4; math.F32» =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

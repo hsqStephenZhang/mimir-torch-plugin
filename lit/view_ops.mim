@@ -4,6 +4,7 @@
 // CHECK-LABEL: extern fun view_ops
 // CHECK-COUNT-2: tensor.map_reduce
 
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -18,5 +19,6 @@ extern fun view_ops(input: «2, 3, 4; I32»)
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

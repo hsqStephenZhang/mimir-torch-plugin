@@ -3,6 +3,7 @@
 // CHECK-NOT: torch.comparison.ge_i64_scalar
 // CHECK: tensor.map_reduce
 
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -10,4 +11,4 @@ extern fun ge_i64_scalar(input: «2, 4; I64»): «2, 4; Bool» =
     return (torch.comparison.ge_i64_scalar @(2, (2, 4)) (input, 2I64));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

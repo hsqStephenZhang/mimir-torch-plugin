@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=tensor.generate \
 // RUN:   --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -50,4 +51,4 @@ extern fun gather_dynamic_dim(
         dimension (input, index));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

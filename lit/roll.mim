@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=tensor.generate \
 // RUN:   --implicit-check-not=tensor.get --implicit-check-not=Match
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -14,4 +15,4 @@ extern fun roll(input: «2, 3, 4; math.F32»): «2, 3, 4; math.F32» =
         ((1, 2), (1I64, 2I64)) input);
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

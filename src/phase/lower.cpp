@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "mim/plug/torch/phase/lower.h"
 
 #include <string_view>
@@ -13,9 +15,19 @@
 
 namespace mim::plug::torch::phase {
 
+namespace {
+/// The curried arguments of @p app, outermost last.
+DefVec curried_args(const App* app) {
+    DefVec args;
+    for (const Def* def = app; auto a = def->isa<App>(); def = a->callee()) args.emplace_back(a->arg());
+    std::ranges::reverse(args);
+    return args;
+}
+} // namespace
+
 const Def* DecomposeByImpl::apply_impl(const App* app, flags_t impl_flags) {
     auto [axm, curry, remaining] = Axm::get(app);
-    auto [_, args] = app->uncurry();
+    auto args = curried_args(app);
     (void)curry;
     (void)remaining;
     auto impl      = new_world().annex(impl_flags);
@@ -60,7 +72,7 @@ const Def* DecomposeByImpl::decompose_generated(const Def* def) {
                 if (!active_.emplace(app).second)
                     fe::throwf("cyclic implementation decomposition at `{}`", axm->sym());
                 try {
-                    auto [_, args] = app->uncurry();
+                    auto args = curried_args(app);
                     auto impl      = new_world().annex(i->second);
                     if (!impl) fe::throwf("implementation annex `{}` is unavailable", i->second);
                     for (auto arg : args)
@@ -80,8 +92,8 @@ const Def* DecomposeByImpl::decompose_generated(const Def* def) {
         auto new_callee = decompose_generated(app->callee());
         if (auto pi = new_callee->type()->isa<Pi>())
             if (!Checker::assignable(pi->dom(), new_arg) && new_arg->num_projs() == pi->num_doms())
-                new_arg = new_world().tuple(pi->dom(), DefVec(pi->num_doms(), [&](size_t i) {
-                    return new_arg->proj(i);
+                new_arg = new_world().tuple(pi->dom(), DefVec(size_t(pi->num_doms()), [&](size_t i) {
+                    return new_arg->proj(pi->num_doms(), i);
                 }));
         return generated_[def] = new_world().app(new_callee, new_arg);
     }

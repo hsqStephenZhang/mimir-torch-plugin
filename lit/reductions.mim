@@ -7,6 +7,7 @@
 // CHECK-LABEL: extern fun reductions
 // CHECK: tensor.map_reduce
 
+plugin tensor;
 plugin core;
 plugin torch;
 plugin compile;
@@ -48,5 +49,6 @@ extern fun mean_all(input: «17, 19; Nat»): Nat =
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

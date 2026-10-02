@@ -2,6 +2,7 @@
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.require \
 // RUN:   --implicit-check-not=Match %s
 
+plugin tensor;
 plugin math;
 plugin torch;
 plugin compile;
@@ -45,5 +46,6 @@ extern fun correction_d_fractional(input: «2, 2; math.F32»)
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
+        tensor.lower_tensor,
         compile.cleanup,
     );

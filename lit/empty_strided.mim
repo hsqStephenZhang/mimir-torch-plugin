@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=tensor.generate
 
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -10,4 +11,4 @@ extern fun empty_strided(): «2, 3; I32» =
     return (torch.creation.empty_strided @(I32, 2) ((2, 3), (3, 1)));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

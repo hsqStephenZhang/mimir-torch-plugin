@@ -4,6 +4,7 @@
 // CHECK-NOT: torch.normalization.native_layer_norm
 // CHECK: tensor.map_reduce
 
+plugin tensor;
 plugin math;
 plugin option;
 plugin torch;
@@ -23,4 +24,4 @@ extern fun native_group_norm(
         (2, 4, 15, 2, 0.00001:math.F32));
 
 extern lam _compile (): compile.Phase =
-    compile.phases ff (torch.lower_torch, compile.cleanup);
+    compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);
