@@ -380,6 +380,9 @@ Lower::Lower(World& world, flags_t annex, bool selective)
     MIM_BIND_TORCH_SUB(normalization, native_batch_norm_functional, native_batch_norm_functional_op);
     MIM_BIND_TORCH_SUB(normalization, softmax, softmax_op);
     MIM_BIND_TORCH_SUB(normalization, log_softmax, log_softmax_op);
+    MIM_BIND_TORCH_SUB(recurrent, rnn_direction, rnn_direction_op);
+    MIM_BIND_TORCH_SUB(recurrent, gru_direction, gru_direction_op);
+    MIM_BIND_TORCH_SUB(recurrent, lstm_direction, lstm_direction_op);
     MIM_BIND_TORCH_SUB(linalg, triu, triu_op);
     MIM_BIND_TORCH_SUB(linalg, tril, tril_op);
 

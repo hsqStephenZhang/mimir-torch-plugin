@@ -1,0 +1,47 @@
+// RUN: %mim -p opt %s -o - | %FileCheck --implicit-check-not=torch.recurrent %s
+
+plugin tensor;
+plugin math;
+plugin option;
+plugin torch;
+plugin compile;
+
+// Every direction scans the leading sequence axis; the reverse one flips it on the way in and out.
+// CHECK-LABEL: extern fun rnn_tanh
+// CHECK: tensor.scan
+// CHECK-LABEL: extern fun gru
+// CHECK: tensor.scan
+// CHECK-LABEL: extern fun lstm_reverse
+// CHECK: tensor.scan
+
+let F = torch.resolve_floating math.F32;
+
+extern fun rnn_tanh (input: «4, 2, 3; math.F32»,
+                     hidden: «2, 5; math.F32»,
+                     weight_ih: «5, 3; math.F32»,
+                     weight_hh: «5, 5; math.F32»,
+                     bias_ih bias_hh: «5; math.F32»)
+                  : [«4, 2, 5; math.F32», «2, 5; math.F32»] =
+    return (torch.recurrent.rnn_direction F @(4, 2, 3, 5) (ff, ff)
+        (input, hidden, weight_ih, weight_hh, option.some bias_ih, option.some bias_hh));
+
+extern fun gru (input: «4, 2, 3; math.F32»,
+                hidden: «2, 5; math.F32»,
+                weight_ih: «15, 3; math.F32»,
+                weight_hh: «15, 5; math.F32»,
+                bias_ih bias_hh: «15; math.F32»)
+             : [«4, 2, 5; math.F32», «2, 5; math.F32»] =
+    return (torch.recurrent.gru_direction F @(4, 2, 3, 5) ff
+        (input, hidden, weight_ih, weight_hh, option.some bias_ih, option.some bias_hh));
+
+extern fun lstm_reverse (input: «4, 2, 3; math.F32»,
+                         hidden cell: «2, 5; math.F32»,
+                         weight_ih: «20, 3; math.F32»,
+                         weight_hh: «20, 5; math.F32»,
+                         bias_ih bias_hh: «20; math.F32»)
+                      : [«4, 2, 5; math.F32», «2, 5; math.F32», «2, 5; math.F32»] =
+    return (torch.recurrent.lstm_direction F @(4, 2, 3, 5) tt
+        (input, hidden, cell, weight_ih, weight_hh, option.some bias_ih, option.some bias_hh));
+
+extern lam _compile (): compile.Phase =
+    compile.phases ff (torch.lower_torch, compile.cleanup);

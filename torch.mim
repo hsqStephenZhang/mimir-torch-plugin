@@ -7171,3 +7171,229 @@ anx lam flip {T: *, r nr: Nat, s: «r; Nat»}
                 (torch_flip_element @(T, r, nr) (s, dims) input);
     end;
 }
+
+pub mod recurrent {
+/// One direction of `torch.nn.RNN`. The leading sequence axis is scanned with a loop-carried hidden
+/// tensor; `relu` selects the ReLU nonlinearity over the standard tanh, and `reverse` runs the sequence
+/// backwards while still returning the output in the original time order.
+/// PyTorch API: https://pytorch.org/docs/stable/generated/torch.nn.RNN.html
+/// Types: `[seq, batch, input]`, `[batch, hidden]`, input/recurrent weights and optional biases to
+/// `[output, final_hidden]`.
+axm rnn_direction: [F: Floating]
+                 → {seq batch input_size hidden: Nat}
+                 → [relu reverse: Bool]
+                 → [input: «seq, batch, input_size; F#A#R#T»,
+                    initial_hidden: «batch, hidden; F#A#R#T»,
+                    weight_ih: «hidden, input_size; F#A#R#T»,
+                    weight_hh: «hidden, hidden; F#A#R#T»,
+                    bias_ih: option.Opt «hidden; F#A#R#T»,
+                    bias_hh: option.Opt «hidden; F#A#R#T»]
+                 → [«seq, batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»];
+
+/// One direction of `torch.nn.GRU`, in PyTorch's `(reset, update, new)` gate order and with its
+/// reset-after recurrent-bias semantics.
+/// PyTorch API: https://pytorch.org/docs/stable/generated/torch.nn.GRU.html
+/// Types: weights and biases have leading extent `3 * hidden`.
+axm gru_direction: [F: Floating]
+                 → {seq batch input_size hidden: Nat}
+                 → [reverse: Bool]
+                 → [input: «seq, batch, input_size; F#A#R#T»,
+                    initial_hidden: «batch, hidden; F#A#R#T»,
+                    weight_ih: «3 * hidden, input_size; F#A#R#T»,
+                    weight_hh: «3 * hidden, hidden; F#A#R#T»,
+                    bias_ih: option.Opt «3 * hidden; F#A#R#T»,
+                    bias_hh: option.Opt «3 * hidden; F#A#R#T»]
+                 → [«seq, batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»];
+
+/// One direction of `torch.nn.LSTM`, in PyTorch's `(input, forget, cell, output)` gate order.
+/// The scan state carries both the hidden and the cell tensor.
+/// PyTorch API: https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html
+/// Types: weights and biases have leading extent `4 * hidden`.
+axm lstm_direction: [F: Floating]
+                  → {seq batch input_size hidden: Nat}
+                  → [reverse: Bool]
+                  → [input: «seq, batch, input_size; F#A#R#T»,
+                     initial_hidden: «batch, hidden; F#A#R#T»,
+                     initial_cell: «batch, hidden; F#A#R#T»,
+                     weight_ih: «4 * hidden, input_size; F#A#R#T»,
+                     weight_hh: «4 * hidden, hidden; F#A#R#T»,
+                     bias_ih: option.Opt «4 * hidden; F#A#R#T»,
+                     bias_hh: option.Opt «4 * hidden; F#A#R#T»]
+                  → [«seq, batch, hidden; F#A#R#T»,
+                     «batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»];
+}
+lam torch_recurrent_binary (A: Arithmetic) {batch hidden: Nat}
+                           (op: [A#R#T, A#R#T] → A#R#T)
+                           (lhs rhs: «batch, hidden; A#R#T»): «batch, hidden; A#R#T» =
+    tensor.binary @(A#R#T, A#R#T, A#R#T) op @(2, (batch, hidden)) (lhs, rhs);
+
+lam torch_recurrent_unary {T: *, batch hidden: Nat}
+                          (op: T → T) (input: «batch, hidden; T»): «batch, hidden; T» =
+    tensor.unary @(T, T) op @(2, (batch, hidden)) input;
+
+/// The `gate`-th of `gates` equally sized column blocks.
+lam torch_gate_slice {T: *, gates batch hidden: Nat}
+                     (gate: Nat) (input: «batch, gates * hidden; T»): «batch, hidden; T» =
+    tensor.slice @(T, 2) (batch, gates * hidden)
+        ((0, gate * hidden), (1, 1), (batch, hidden)) input;
+
+lam torch_reverse_leading {T: *, seq batch size: Nat}
+                          (input: «seq, batch, size; T»): «seq, batch, size; T» =
+    indexing_impl.flip @(T, 3, 1, (seq, batch, size)) (0I64,) input;
+
+lam torch_recurrent_scan {T S: *, seq batch input_size hidden: Nat}
+                         (reverse: Bool)
+                         (step: Cn [«batch, input_size; T», S, Cn [«batch, hidden; T», S]])
+                         (input: «seq, batch, input_size; T», initial_state: S)
+                       : [«seq, batch, hidden; T», S] =
+    runtime.require (seq >= 1, "recurrent input sequence must be non-empty") body
+where
+    lam body (): [«seq, batch, hidden; T», S] =
+        (core.select (reverse, backward, forward)) ()
+    where
+        lam forward (): [«seq, batch, hidden; T», S] =
+            tensor.scan @(T, S, seq, 2, 2) ((batch, input_size), (batch, hidden))
+                step (input, initial_state);
+
+        /// Scanned back to front, then put back into the original time order.
+        lam backward (): [«seq, batch, hidden; T», S] =
+            let reversed = torch_reverse_leading @(T, seq, batch, input_size) input;
+            let scanned = tensor.scan @(T, S, seq, 2, 2) ((batch, input_size), (batch, hidden))
+                step (reversed, initial_state);
+            (torch_reverse_leading @(T, seq, batch, hidden) scanned#ff, scanned#tt);
+    end;
+end;
+
+lam torch_rnn_activation (F: Floating) (relu: Bool) (x: F#A#R#T): F#A#R#T =
+    core.select @F#A#R#T (relu, torch_relu_scalar F#A x, torch_tanh_scalar F x);
+
+con torch_rnn_step (F: Floating) {batch input_size hidden: Nat}
+                   (relu: Bool)
+                   (weight_ih: «hidden, input_size; F#A#R#T»,
+                    weight_hh: «hidden, hidden; F#A#R#T»,
+                    bias_ih: option.Opt «hidden; F#A#R#T»,
+                    bias_hh: option.Opt «hidden; F#A#R#T»)
+                   (x: «batch, input_size; F#A#R#T»,
+                    state: «batch, hidden; F#A#R#T»,
+                    return: Cn [«batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»]) =
+    let from_input = linalg_impl.linear F#A @(1, input_size, hidden) (batch,) (x, weight_ih) bias_ih;
+    let from_hidden = linalg_impl.linear F#A @(1, hidden, hidden) (batch,) (state, weight_hh) bias_hh;
+    let preactivation = torch_recurrent_binary F#A @(batch, hidden)
+        F#A#R#add (from_input, from_hidden);
+    let next = torch_recurrent_unary @(F#A#R#T, batch, hidden)
+        (torch_rnn_activation F relu) preactivation;
+    return (next, next);
+
+con torch_gru_step (F: Floating) {batch input_size hidden: Nat}
+                   (weight_ih: «3 * hidden, input_size; F#A#R#T»,
+                    weight_hh: «3 * hidden, hidden; F#A#R#T»,
+                    bias_ih: option.Opt «3 * hidden; F#A#R#T»,
+                    bias_hh: option.Opt «3 * hidden; F#A#R#T»)
+                   (x: «batch, input_size; F#A#R#T»,
+                    state: «batch, hidden; F#A#R#T»,
+                    return: Cn [«batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»]) =
+    let input_gates = linalg_impl.linear F#A @(1, input_size, 3 * hidden) (batch,)
+        (x, weight_ih) bias_ih;
+    let hidden_gates = linalg_impl.linear F#A @(1, hidden, 3 * hidden) (batch,)
+        (state, weight_hh) bias_hh;
+    let ir = torch_gate_slice @(F#A#R#T, 3, batch, hidden) 0 input_gates;
+    let iz = torch_gate_slice @(F#A#R#T, 3, batch, hidden) 1 input_gates;
+    let inn = torch_gate_slice @(F#A#R#T, 3, batch, hidden) 2 input_gates;
+    let hr = torch_gate_slice @(F#A#R#T, 3, batch, hidden) 0 hidden_gates;
+    let hz = torch_gate_slice @(F#A#R#T, 3, batch, hidden) 1 hidden_gates;
+    let hn = torch_gate_slice @(F#A#R#T, 3, batch, hidden) 2 hidden_gates;
+    let reset = torch_recurrent_unary @(F#A#R#T, batch, hidden) (torch_sigmoid_scalar F)
+        (torch_recurrent_binary F#A @(batch, hidden) F#A#R#add (ir, hr));
+    let update = torch_recurrent_unary @(F#A#R#T, batch, hidden) (torch_sigmoid_scalar F)
+        (torch_recurrent_binary F#A @(batch, hidden) F#A#R#add (iz, hz));
+    let reset_hidden = torch_recurrent_binary F#A @(batch, hidden) F#A#R#mul (reset, hn);
+    let candidate = torch_recurrent_unary @(F#A#R#T, batch, hidden) (torch_tanh_scalar F)
+        (torch_recurrent_binary F#A @(batch, hidden) F#A#R#add (inn, reset_hidden));
+    let delta = torch_recurrent_binary F#A @(batch, hidden) F#A#sub (state, candidate);
+    let weighted_delta = torch_recurrent_binary F#A @(batch, hidden) F#A#R#mul (update, delta);
+    let next = torch_recurrent_binary F#A @(batch, hidden) F#A#R#add (candidate, weighted_delta);
+    return (next, next);
+
+/// The leading `Bool` is a private tag keeping the two rank-2 state tensors from normalizing into one
+/// rank-3 tensor; it stays `ff` and so carries no state of its own.
+con torch_lstm_step (F: Floating) {batch input_size hidden: Nat}
+                    (weight_ih: «4 * hidden, input_size; F#A#R#T»,
+                     weight_hh: «4 * hidden, hidden; F#A#R#T»,
+                     bias_ih: option.Opt «4 * hidden; F#A#R#T»,
+                     bias_hh: option.Opt «4 * hidden; F#A#R#T»)
+                    (x: «batch, input_size; F#A#R#T»,
+                     state: [Bool, «batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»],
+                     return: Cn [«batch, hidden; F#A#R#T»,
+                                 [Bool, «batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»]]) =
+    let input_gates = linalg_impl.linear F#A @(1, input_size, 4 * hidden) (batch,)
+        (x, weight_ih) bias_ih;
+    let hidden_gates = linalg_impl.linear F#A @(1, hidden, 4 * hidden) (batch,)
+        (state#1_3, weight_hh) bias_hh;
+    let gates = tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#R#add @(2, (batch, 4 * hidden)) (input_gates, hidden_gates);
+    let input_gate = torch_recurrent_unary @(F#A#R#T, batch, hidden) (torch_sigmoid_scalar F)
+        (torch_gate_slice @(F#A#R#T, 4, batch, hidden) 0 gates);
+    let forget_gate = torch_recurrent_unary @(F#A#R#T, batch, hidden) (torch_sigmoid_scalar F)
+        (torch_gate_slice @(F#A#R#T, 4, batch, hidden) 1 gates);
+    let cell_gate = torch_recurrent_unary @(F#A#R#T, batch, hidden) (torch_tanh_scalar F)
+        (torch_gate_slice @(F#A#R#T, 4, batch, hidden) 2 gates);
+    let output_gate = torch_recurrent_unary @(F#A#R#T, batch, hidden) (torch_sigmoid_scalar F)
+        (torch_gate_slice @(F#A#R#T, 4, batch, hidden) 3 gates);
+    let retained = torch_recurrent_binary F#A @(batch, hidden) F#A#R#mul (forget_gate, state#2_3);
+    let written = torch_recurrent_binary F#A @(batch, hidden) F#A#R#mul (input_gate, cell_gate);
+    let next_cell = torch_recurrent_binary F#A @(batch, hidden) F#A#R#add (retained, written);
+    let activated_cell = torch_recurrent_unary @(F#A#R#T, batch, hidden)
+        (torch_tanh_scalar F) next_cell;
+    let next_hidden = torch_recurrent_binary F#A @(batch, hidden) F#A#R#mul
+        (output_gate, activated_cell);
+    return (next_hidden, (ff, next_hidden, next_cell));
+
+pub mod recurrent_impl {
+anx lam rnn_direction (F: Floating) {seq batch input_size hidden: Nat}
+                      (relu reverse: Bool)
+                      (input: «seq, batch, input_size; F#A#R#T»,
+                       initial_hidden: «batch, hidden; F#A#R#T»,
+                       weight_ih: «hidden, input_size; F#A#R#T»,
+                       weight_hh: «hidden, hidden; F#A#R#T»,
+                       bias_ih: option.Opt «hidden; F#A#R#T»,
+                       bias_hh: option.Opt «hidden; F#A#R#T»)
+                    : [«seq, batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»] =
+    torch_recurrent_scan @(F#A#R#T, «batch, hidden; F#A#R#T», seq, batch, input_size, hidden)
+        reverse
+        (torch_rnn_step F @(batch, input_size, hidden) relu
+            (weight_ih, weight_hh, bias_ih, bias_hh))
+        (input, initial_hidden);
+
+anx lam gru_direction (F: Floating) {seq batch input_size hidden: Nat}
+                      (reverse: Bool)
+                      (input: «seq, batch, input_size; F#A#R#T»,
+                       initial_hidden: «batch, hidden; F#A#R#T»,
+                       weight_ih: «3 * hidden, input_size; F#A#R#T»,
+                       weight_hh: «3 * hidden, hidden; F#A#R#T»,
+                       bias_ih: option.Opt «3 * hidden; F#A#R#T»,
+                       bias_hh: option.Opt «3 * hidden; F#A#R#T»)
+                    : [«seq, batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»] =
+    torch_recurrent_scan @(F#A#R#T, «batch, hidden; F#A#R#T», seq, batch, input_size, hidden)
+        reverse
+        (torch_gru_step F @(batch, input_size, hidden) (weight_ih, weight_hh, bias_ih, bias_hh))
+        (input, initial_hidden);
+
+anx lam lstm_direction (F: Floating) {seq batch input_size hidden: Nat}
+                       (reverse: Bool)
+                       (input: «seq, batch, input_size; F#A#R#T»,
+                        initial_hidden: «batch, hidden; F#A#R#T»,
+                        initial_cell: «batch, hidden; F#A#R#T»,
+                        weight_ih: «4 * hidden, input_size; F#A#R#T»,
+                        weight_hh: «4 * hidden, hidden; F#A#R#T»,
+                        bias_ih: option.Opt «4 * hidden; F#A#R#T»,
+                        bias_hh: option.Opt «4 * hidden; F#A#R#T»)
+                     : [«seq, batch, hidden; F#A#R#T»,
+                        «batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»] =
+    let scanned = torch_recurrent_scan
+        @(F#A#R#T, [Bool, «batch, hidden; F#A#R#T», «batch, hidden; F#A#R#T»],
+          seq, batch, input_size, hidden)
+        reverse
+        (torch_lstm_step F @(batch, input_size, hidden) (weight_ih, weight_hh, bias_ih, bias_hh))
+        (input, (ff, initial_hidden, initial_cell));
+    (scanned#ff, scanned#tt#1_3, scanned#tt#2_3);
+}
