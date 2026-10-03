@@ -7,11 +7,11 @@ plugin torch;
 plugin compile;
 
 // Every direction scans the leading sequence axis; the reverse one flips it on the way in and out.
-// CHECK-LABEL: extern fun rnn_tanh
-// CHECK: tensor.scan
 // CHECK-LABEL: extern fun gru
 // CHECK: tensor.scan
 // CHECK-LABEL: extern fun lstm_reverse
+// CHECK: tensor.scan
+// CHECK-LABEL: extern fun rnn_tanh
 // CHECK: tensor.scan
 
 let F = torch.resolve_floating math.F32;
