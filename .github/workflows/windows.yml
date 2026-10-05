@@ -67,7 +67,7 @@ jobs:
       - name: Verify FileCheck
         shell: bash
         run: |
-          "$GITHUB_WORKSPACE/bin/FileCheck-x86_64-win.exe" --version
+          "$GITHUB_WORKSPACE/mimir/bin/FileCheck-x86_64-win.exe" --version
 
       # ccache cannot masquerade as cl.exe the way it does for gcc/clang, so it is hooked through
       # CMAKE_{C,CXX}_COMPILER_LAUNCHER below. That also forces /Z7 (Embedded) over MSVC's default
@@ -98,7 +98,7 @@ jobs:
                 -DPython_EXECUTABLE=%PYTHON_EXE%          ^
                 -DPYTHON_EXECUTABLE=%PYTHON_EXE%          ^
                 -DMIM_LIT_TIMEOUT=300                     ^
-                -DMIM_FILECHECK=mimir/bin/FileCheck-x86_64-win.exe
+                -DMIM_FILECHECK=${{github.workspace}}/mimir/bin/FileCheck-x86_64-win.exe
 
       # Deliberately after Configure: moving it earlier would let `find_program(NAMES clang)` in
       # cmake/Mim.cmake succeed and switch MIM_BUILD_LL_RUNTIME on for Windows, which is a behaviour
