@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hsqStephenZhang/MimIR
-          ref: feat/torch-plugin-new
+          ref: feat/plugin-support-v2
           path: mimir
           submodules: recursive
 
@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hsqStephenZhang/mimir-runtime-plugin
-          ref: main
+          ref: feat/ll-emit
           path: mimir/extra/runtime
 
       - name: Install dependencies
@@ -87,7 +87,7 @@ jobs:
           set CXX=cl.exe
           python -c "import sys; print(sys.executable)" > tmpPath
           set /p PYTHON_EXE= < tmpPath
-          cmake -B build -G Ninja                         ^
+          cmake -S mimir -B build -G Ninja                ^
                 -DCMAKE_BUILD_TYPE=${{matrix.build-type}} ^
                 -DCMAKE_C_COMPILER_LAUNCHER=ccache        ^
                 -DCMAKE_CXX_COMPILER_LAUNCHER=ccache      ^

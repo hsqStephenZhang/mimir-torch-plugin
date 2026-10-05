@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hsqStephenZhang/MimIR
-          ref: feat/torch-plugin-new
+          ref: feat/plugin-support-v2
           path: mimir
           submodules: recursive
 
@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hsqStephenZhang/mimir-runtime-plugin
-          ref: main
+          ref: feat/ll-emit
           path: mimir/extra/runtime
 
       - name: Install dependencies
@@ -57,7 +57,7 @@ jobs:
       - name: Configure
         run: |
           CC="${LLVM_PREFIX}/bin/clang" CXX="${LLVM_PREFIX}/bin/clang++"    \
-          cmake -B build                                                    \
+          cmake -S mimir -B build                                           \
                 -G Ninja                                                    \
                 -DCMAKE_BUILD_TYPE=${{matrix.build-type}}                   \
                 -DCMAKE_C_COMPILER_LAUNCHER=ccache                          \
