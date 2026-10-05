@@ -12,9 +12,9 @@ extern fun invalid_addcmul(
     tensor2: «3, 3; math.F32»): «3, 3; math.F32» =
     return (torch.binary.addcmul (torch.resolve_arithmetic math.F32)
         @(1, 1, 2, 2)
-        ((2,), (core.idx 2 0 0,),
-         (3,), (core.idx 2 0 1,),
-         (3, 3), (core.idx 2 0 0, core.idx 2 0 1), (3, 3))
+        ((2,), (0₂,),
+         (3,), (1₂,),
+         (3, 3), (0₂, 1₂), (3, 3))
         (self, tensor1, tensor2, 1.0:math.F32));
 
 extern lam _compile (): compile.Phase = torch.lower_torch;

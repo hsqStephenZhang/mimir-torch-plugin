@@ -15,9 +15,9 @@ extern fun addcmul_dynamic {a n m: Nat}(
     tensor2: «n, m; math.F32»): «n, m; math.F32» =
     return (torch.binary.addcmul (torch.resolve_arithmetic math.F32)
         @(1, 1, 2, 2)
-        ((a,), (core.idx 2 0 0,),
-         (m,), (core.idx 2 0 1,),
-         (n, m), (core.idx 2 0 0, core.idx 2 0 1), (n, m))
+        ((a,), (0₂,),
+         (m,), (1₂,),
+         (n, m), (0₂, 1₂), (n, m))
         (self, tensor1, tensor2, 1.0:math.F32));
 
 extern lam _compile (): compile.Phase =

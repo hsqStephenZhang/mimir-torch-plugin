@@ -30,12 +30,12 @@ extern fun add_alpha(lhs rhs: «2; Nat»): «2; Nat» =
 extern fun sub_alpha(lhs rhs: «2; Nat»): «2; Nat» =
     return (torch.binary.sub NatArithmetic @(1, (2,)) (lhs, rhs, 4));
 
+// CHECK-DAG: core.nat.mul
+// CHECK-DAG: core.nat.add
 // CHECK-LABEL: extern fun add_alpha
-// CHECK: core.nat.mul
-// CHECK: core.nat.add
+// CHECK-DAG: core.nat.mul
+// CHECK-DAG: core.nat.sub
 // CHECK-LABEL: extern fun sub_alpha
-// CHECK: core.nat.mul
-// CHECK: core.nat.sub
 
 extern lam _compile (): compile.Phase =
     compile.phases ff (

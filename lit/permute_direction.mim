@@ -8,7 +8,7 @@ plugin compile;
 // [2, 0, 1] is intentionally not self-inverse. It distinguishes PyTorch's
 // output-to-input axis convention from tensor.transpose's convention.
 // CHECK-LABEL: extern fun permute_rank3
-// CHECK-SAME: ({{.*}}: «2; «3; «4; I32»»»): «4; «2; «3; I32»»»
+// CHECK-SAME: ({{.*}}: «2, 3, 4; I32»): «4, 2, 3; I32»
 // CHECK: tensor.map_reduce
 extern fun permute_rank3(input: «2, 3, 4; I32»): «4, 2, 3; I32» =
     return (torch.shape.permute @(I32, 3, (2, 3, 4))

@@ -5,8 +5,8 @@ plugin math;
 plugin torch;
 plugin compile;
 
+// Each input's new unit axis folds away, so stacking is the concat alone.
 // CHECK-LABEL: extern fun stack_dim1
-// CHECK: tensor.map_reduce
 // CHECK: tensor.concat
 extern fun stack_dim1(a b c: «2, 3; math.F32»): «2, 3, 3; math.F32» =
     return (torch.shape.stack @(math.F32, 3, 2, 3)

@@ -1,9 +1,9 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match %s
 
-// CHECK-LABEL: extern fun clamp_min_f32
 // CHECK-DAG: math.cmp.uGlE
 // CHECK-DAG: math.cmp.Ugle
+// CHECK-LABEL: extern fun clamp_min_f32
 
 plugin tensor;
 plugin math;

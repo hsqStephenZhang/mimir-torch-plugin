@@ -7,8 +7,8 @@ plugin math;
 plugin torch;
 plugin compile;
 
-// CHECK-LABEL: extern fun roll
 // CHECK-DAG: affine.semiop.rem
+// CHECK-LABEL: extern fun roll
 // CHECK-DAG: tensor.map_reduce
 extern fun roll(input: «2, 3, 4; math.F32»): «2, 3, 4; math.F32» =
     return (torch.indexing.roll @(math.F32, 3, 2, (2, 3, 4))

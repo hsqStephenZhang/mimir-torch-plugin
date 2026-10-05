@@ -17,9 +17,9 @@ extern fun addcmul_broadcast(
     tensor2: «2, 3; math.F32»): «2, 3; math.F32» =
     return (torch.binary.addcmul (torch.resolve_arithmetic math.F32)
         @(1, 1, 2, 2)
-        ((2,), (core.idx 2 0 0,),
-         (3,), (core.idx 2 0 1,),
-         (2, 3), (core.idx 2 0 0, core.idx 2 0 1), (2, 3))
+        ((2,), (0₂,),
+         (3,), (1₂,),
+         (2, 3), (0₂, 1₂), (2, 3))
         (self, tensor1, tensor2, 2.5:math.F32));
 
 extern fun addcdiv_broadcast(
@@ -27,9 +27,9 @@ extern fun addcdiv_broadcast(
     tensor2: «2, 3; math.F32»): «2, 3; math.F32» =
     return (torch.binary.addcdiv (torch.resolve_arithmetic math.F32)
         @(1, 1, 2, 2)
-        ((2,), (core.idx 2 0 0,),
-         (3,), (core.idx 2 0 1,),
-         (2, 3), (core.idx 2 0 0, core.idx 2 0 1), (2, 3))
+        ((2,), (0₂,),
+         (3,), (1₂,),
+         (2, 3), (0₂, 1₂), (2, 3))
         (self, tensor1, tensor2, 2.5:math.F32));
 
 extern lam _compile (): compile.Phase =

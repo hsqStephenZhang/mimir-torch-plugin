@@ -31,8 +31,8 @@ let NatFloating: torch.Floating = (
 
 extern fun max_dim_dynamic(dimension: I64, input: «2, 3; Nat»)
   : [Bool,
-     «torch_reduce_shape ((2, 3), torch_canonical_dim @2 dimension); Nat»,
-     «torch_reduce_shape ((2, 3), torch_canonical_dim @2 dimension); I64»] =
+     «torch.torch_reduce_shape ((2, 3), torch.torch_canonical_dim @2 dimension); Nat»,
+     «torch.torch_reduce_shape ((2, 3), torch.torch_canonical_dim @2 dimension); I64»] =
     return (torch.reduction.max_dim NatFloating @(2, (2, 3)) dimension input);
 
 // CHECK-LABEL: extern fun max_dim

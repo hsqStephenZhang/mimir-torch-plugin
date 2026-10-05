@@ -24,8 +24,8 @@ let NatArithmetic: torch.Arithmetic = (
 
 // A static zero beta must erase every read and broadcast of self.
 // CHECK-LABEL: extern fun addmm_beta_zero
-// CHECK: let product_
-// CHECK-NOT: let broadcast_self_
+// CHECK: = tensor.map_reduce_post @ (2, 0)
+// CHECK-NOT: let broadcast_self{{(_[0-9]+)?}} =
 extern fun addmm_beta_zero(
     self: «4; Nat», mat1: «2, 3; Nat», mat2: «3, 4; Nat»)
   : «2, 4; Nat» =
@@ -34,8 +34,8 @@ extern fun addmm_beta_zero(
 
 // A nonzero beta retains the checked self broadcast and accumulation.
 // CHECK-LABEL: extern fun addmm_with_self
-// CHECK: let product_
-// CHECK: let broadcast_self_
+// CHECK: = tensor.map_reduce_post @ (2, 0)
+// CHECK: let broadcast_self{{(_[0-9]+)?}} =
 extern fun addmm_with_self(
     self: «2; Nat», mat1: «2, 3; Nat», mat2: «3, 4; Nat»)
   : «2, 4; Nat» =

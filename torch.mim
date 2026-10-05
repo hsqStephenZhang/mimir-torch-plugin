@@ -566,7 +566,7 @@ lam torch_dim_in_range {r: Nat} (dimension: I64): Bool =
 
 /// PyTorch source: `torch/_prims_common/__init__.py::canonicalize_dim`.
 /// Python: `return dimension + rank if dimension < 0 else dimension`.
-lam torch_canonical_dim {r: Nat} (dimension: I64): Idx r =
+pub lam torch_canonical_dim {r: Nat} (dimension: I64): Idx r =
     let rank = core.bitcast I64 r;
     let adjusted = core.select (
         core.icmp.sl (dimension, 0I64),
@@ -610,7 +610,7 @@ lam torch_kept_dim {r: Nat}
 
 /// PyTorch source: `torch/_prims_common/__init__.py::compute_reduction_output_shape`.
 /// Python: `return shape[:dimension] + shape[dimension + 1:]`.
-lam torch_reduce_shape {r: Nat}
+pub lam torch_reduce_shape {r: Nat}
                        (s: «r; Nat», dimension: Idx r): «r - 1; Nat» =
     ‹i: r - 1; s#(torch_kept_dim @r (dimension, i))›;
 

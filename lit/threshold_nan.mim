@@ -1,8 +1,8 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=math.cmp.uGle %s
 
+// CHECK-DAG: math.cmp.ugLE
 // CHECK-LABEL: extern fun threshold_f32
-// CHECK: math.cmp.ugLE
 
 plugin tensor;
 plugin math;

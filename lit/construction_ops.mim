@@ -1,11 +1,12 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=Match %s
 
+// `repeat` and `narrow` stay the core `tensor.repeat` and `tensor.slice`, and the copies of the input are the input.
 // CHECK-LABEL: extern fun construction_ops
-// CHECK-DAG: tensor.map_reduce
-// CHECK-DAG: tensor.map_reduce
-// CHECK-DAG: tensor.map_reduce
-// CHECK-DAG: tensor.generate (I64, 1)
+// CHECK-DAG: tensor.repeat
+// CHECK-DAG: tensor.slice
+// CHECK-DAG: , input,
+// CHECK-DAG: tensor.generate @ (I64, 1)
 // CHECK-DAG: tensor.splat
 // CHECK-DAG: tensor.splat
 // CHECK-DAG: tensor.splat

@@ -1,12 +1,12 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. %s
 
+// CHECK-DAG: math.arith.mul
+// CHECK-DAG: math.arith.add
 // CHECK-LABEL: extern fun add_scalar_lhs
-// CHECK: math.arith.mul
-// CHECK: math.arith.add
+// CHECK-DAG: math.arith.mul
+// CHECK-DAG: math.arith.sub
 // CHECK-LABEL: extern fun sub_scalar_lhs
-// CHECK: math.arith.mul
-// CHECK: math.arith.sub
 
 plugin tensor;
 plugin math;

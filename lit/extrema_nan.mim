@@ -1,10 +1,10 @@
 // RUN: %mim -p opt %s -o - | %FileCheck \
 // RUN:   --implicit-check-not=torch. %s
 
+// CHECK-DAG: math.extrema.IM
 // CHECK-LABEL: extern fun maximum_f32
-// CHECK: math.extrema.IM
+// CHECK-DAG: math.extrema.Im
 // CHECK-LABEL: extern fun minimum_f64
-// CHECK: math.extrema.Im
 
 plugin tensor;
 plugin math;

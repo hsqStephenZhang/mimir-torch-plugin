@@ -28,13 +28,14 @@ extern fun cat(lhs: «2, 3; I32», rhs: «1, 3; I32»): «3, 3; I32» =
 extern fun flatten(input: «2, 3, 4; I32»): «6, 4; I32» =
     return (torch.shape.flatten @(I32, 3, 2) ((2, 3, 4), (6, 4)) input);
 
+// Dropping or adding a unit axis leaves the layout as is: the input comes back unchanged.
 // CHECK-DAG: extern fun squeeze
-// CHECK-DAG: tensor.map_reduce
+// CHECK-DAG: return input
 extern fun squeeze(input: «2, 1, 3; I32»): «2, 3; I32» =
     return (torch.shape.squeeze @(I32, 3, 2) ((2, 1, 3), (2, 3)) input);
 
 // CHECK-DAG: extern fun unsqueeze
-// CHECK-DAG: tensor.map_reduce
+// CHECK-DAG: return input
 extern fun unsqueeze(input: «2, 3; I32»): «2, 1, 3; I32» =
     return (torch.shape.unsqueeze @(I32, 2, 3) ((2, 3), (2, 1, 3)) input);
 

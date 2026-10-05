@@ -18,12 +18,11 @@ extern fun max_pool1d(input: «2, 3, 9; math.F32»)
         (3, 2, 1, 2, tt)
         input);
 
+// The NCL input is NCL1 with a unit axis, which folds away: no reshape on either side of the 2-D pool.
 // CHECK-LABEL: extern fun avg_pool1d
-// CHECK: tensor.map_reduce
 // CHECK: tensor.pad
 // CHECK: tensor.map_reduce
 // CHECK: tensor.generate
-// CHECK: tensor.map_reduce
 extern fun avg_pool1d(input: «2, 3, 8; math.F32»)
   : «2, 3, 5; math.F32» =
     return (torch.pool.avg_pool1d (torch.resolve_floating math.F32)
@@ -37,7 +36,6 @@ extern fun adaptive_avg_pool1d(input: «2, 3, 8; math.F32»)
         @(3, (2, 3, 8)) 1 input);
 
 // CHECK-LABEL: extern fun max_pool1d
-// CHECK: tensor.map_reduce
 // CHECK: tensor.pad
 // CHECK: tensor.map_reduce
 

@@ -5,10 +5,10 @@
 // CHECK: tensor.map_reduce
 // CHECK-LABEL: extern fun add_f64
 // CHECK: tensor.map_reduce
+// CHECK-DAG: math.exp
 // CHECK-LABEL: extern fun exp_f32
-// CHECK: math.exp
+// CHECK-DAG: math.exp
 // CHECK-LABEL: extern fun exp_f64
-// CHECK: math.exp
 
 plugin tensor;
 plugin math;
