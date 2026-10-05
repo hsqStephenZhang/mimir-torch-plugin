@@ -184,8 +184,9 @@ lam torch_float_rsqrt {pe: «2; Nat»} (x: math.F pe): math.F pe =
     math.rrt 0 @pe x;
 
 /// Builds the scalar semantics shared by IEEE floating-point Torch dtypes.
+/// The ring's multiply and add may contract into an FMA, as in PyTorch's own kernels.
 lam torch_float_arithmetic {pe: «2; Nat»}(): Arithmetic = (
-    (math.F pe, 0:(math.F pe), math.arith.add 0 @pe, math.arith.mul 0 @pe),
+    (math.F pe, 0:(math.F pe), math.arith.add math.mode.contract @pe, math.arith.mul math.mode.contract @pe),
     math.arith.sub 0 @pe,
     math.arith.div 0 @pe,
     math.extrema.ieee754max 0 @pe,
