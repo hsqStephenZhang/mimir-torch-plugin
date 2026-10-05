@@ -1,6 +1,7 @@
 // RUN: %mim -p opt %s -o - | %FileCheck %s \
 // RUN:   --implicit-check-not=torch. --implicit-check-not=runtime.static_check
 // RUN: %mim -p opt %s --profile summary | %FileCheck %s --check-prefix=PROFILE
+// RUN: %mim -p opt %s -o - | %FileCheck %s --check-prefix=SCHED
 
 plugin tensor;
 plugin core;
@@ -63,6 +64,15 @@ extern fun convolution_depthwise(
         (input, weight, option.none @«4; Nat»));
 
 // CHECK-COUNT-4: tensor.map_reduce
+// An ungrouped convolution is `tensor.conv`, which schedules it; a grouped one stays an unscheduled reduction.
+// SCHED-LABEL: extern fun convolution_bias
+// SCHED: tensor.map_reduce_post {{.*}} SchedT)
+// SCHED-LABEL: extern fun convolution_depthwise
+// SCHED-NOT: SchedT)
+// SCHED-LABEL: extern fun convolution_grouped
+// SCHED-NOT: SchedT)
+// SCHED-LABEL: extern fun convolution_no_bias
+// SCHED: tensor.map_reduce_post {{.*}} SchedT)
 // CHECK-NOT: Match
 // PROFILE: Profile (flat):
 // PROFILE-DAG: 4 torch.lower_torch: decompose.impl.torch.conv.general

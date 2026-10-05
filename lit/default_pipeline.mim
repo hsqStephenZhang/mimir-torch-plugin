@@ -35,8 +35,9 @@ extern fun add(lhs rhs: «2, 3; Nat»): «2, 3; Nat» =
 // Static optional tensor arguments must normalize after Torch decomposition
 // and before tensor bufferization. Otherwise an avoidable Match survives with
 // an aggregate branch type while its payload is rewritten to a pointer.
+// x · Wᵀ is a scheduled contraction.
 // CHECK-LABEL: extern fun linear_bias
-// CHECK: tensor.map_reduce
+// CHECK: tensor.map_reduce_post {{.*}} SchedT)
 extern fun linear_bias(
     input: «2, 3; Nat», weight: «4, 3; Nat», bias: «4; Nat»)
   : «2, 4; Nat» =
@@ -44,7 +45,7 @@ extern fun linear_bias(
         (input, weight) (option.some bias));
 
 // CHECK-LABEL: extern fun linear_no_bias
-// CHECK: tensor.map_reduce
+// CHECK: tensor.map_reduce_post {{.*}} SchedT)
 extern fun linear_no_bias(input: «2, 3; Nat», weight: «4, 3; Nat»)
   : «2, 4; Nat» =
     return (torch.linalg.linear NatArithmetic @(1, 3, 4) (2,)

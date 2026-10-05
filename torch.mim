@@ -282,11 +282,6 @@ lam torch_scale_scalar (A: Arithmetic) (scale: A#R#T) (x: A#R#T): A#R#T =
 lam torch_div_scalar (A: Arithmetic) (denominator: A#R#T) (x: A#R#T): A#R#T =
     A#div (x, denominator);
 
-/// Python: `return acc + x * weight`.
-fun torch_linear_comb (A: Arithmetic)
-                      (acc: A#R#T, (x: A#R#T, weight: A#R#T))@tt: A#R#T =
-    return (A#R#add (acc, A#R#mul (x, weight)));
-
 /// Python: `return x + offset`.
 lam torch_add_scalar (A: Arithmetic) (offset: A#R#T) (x: A#R#T): A#R#T =
     A#R#add (x, offset);
@@ -2770,16 +2765,22 @@ lam torch_grouped_conv2d
     let output_shape = tensor.conv_shape
         (n, cout, (h, w), (kh, kw), stride, dilation, padding);
     let cout_per_group = cout / groups;
-    tensor.map_reduce
-        (output_shape,
-         (n, cout, output_shape#2_4, output_shape#3_4,
-          cin_per_group, kh, kw))
-        (torch_conv_fun A#R, A#R#_0)
-        (tensor.proj_map (0, 1, 2, 3))
-        (torch_grouped_conv2d_in_map
-            (cin_per_group, cout_per_group, stride, dilation),
-         tensor.proj_map (1, 4, 5, 6))
-        (padded, weight);
+    // An ungrouped convolution is `tensor.conv`, whose implementation schedules it.
+    lam ungrouped(): «tensor.conv_shape (n, cout, (h, w), (kh, kw), stride, dilation, padding); A#R#T» =
+        tensor.conv A#R @(n, cin, cout, h, w, kh, kw) (stride, dilation, padding)
+            (input, core.bitcast «cout, cin, kh, kw; A#R#T» weight);
+    lam grouped(): «tensor.conv_shape (n, cout, (h, w), (kh, kw), stride, dilation, padding); A#R#T» =
+        tensor.map_reduce
+            (output_shape,
+             (n, cout, output_shape#2_4, output_shape#3_4,
+              cin_per_group, kh, kw))
+            (torch_conv_fun A#R, A#R#_0)
+            (tensor.proj_map (0, 1, 2, 3))
+            (torch_grouped_conv2d_in_map
+                (cin_per_group, cout_per_group, stride, dilation),
+             tensor.proj_map (1, 4, 5, 6))
+            (padded, weight);
+    (grouped, ungrouped)#(groups == 1) ();
 
 /// Output shape for the rank-3 NCL specialization of PyTorch convolution.
 /// The length formula is the one-dimensional instance of `tensor.conv_shape`.
@@ -4068,26 +4069,11 @@ anx lam linear (A: Arithmetic) {rb k n: Nat}
                            weight: «n, k; A#R#T»)
                           (bias: option.Opt «n; A#R#T»)
                         : «vec.cat (batch_shape, (n,)); A#R#T» =
-    let input_shape = vec.cat (batch_shape, (k,));
     let output_shape = vec.cat (batch_shape, (n,));
     let ro = rb + 1;
-    let loops = ro + 1;
-    let full_shape = vec.cat (output_shape, (k,));
-    let out_subs = ‹i: ro; core.bitcast Nat i›;
-    let input_subs = ‹i: ro;
-        core.select (core.bitcast Nat i == rb,
-                      ro,
-                      core.bitcast Nat i)›;
-    let weight_subs = (rb, ro);
-    let comb = torch_linear_comb A;
-    let product = tensor.map_reduce @2 @(A#R#T, ro, loops)
-        (output_shape, full_shape)
-        @((A#R#T, A#R#T), (ro, 2), (input_shape, (n, k)))
-        (comb, A#R#_0)
-        (tensor.proj_map @(loops, ro) out_subs)
-        (tensor.proj_map @(loops, ro) input_subs,
-         tensor.proj_map @(loops, 2) weight_subs)
-        (input, weight);
+    // x · Wᵀ is `tensor.dot_product`, whose implementation schedules it.
+    let product = core.bitcast «output_shape; A#R#T»
+        (tensor.dot_product A#R ((core.idx 0 ro rb,), (1_2,), (), ()) (input, weight));
     let effective_bias = option.unwrap_or bias ‹n; A#R#_0›;
     let broadcast_bias = tensor.broadcast_in_dim @(A#R#T, 1, ro)
         ((n,), output_shape, effective_bias, (core.idx 0 ro  rb,));
