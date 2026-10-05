@@ -1,4 +1,4 @@
-// RUN: not %mim %s -p opt -o /dev/null 2>&1 | %FileCheck %s
+// RUN: (! %mim %s -p opt -o /dev/null 2>&1) | %FileCheck %s
 
 // CHECK: triplet_margin_loss expects margin greater than zero
 

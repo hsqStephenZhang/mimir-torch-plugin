@@ -2,7 +2,7 @@
 // RUN: %mim %s -X torch:preserve=activation.relu -o - | %FileCheck %s --check-prefix=SUBTAG
 // RUN: %mim %s -X torch:preserve=activation.leaky_relu -o - | %FileCheck %s --check-prefix=LEAKY
 // RUN: %mim %s -o - | %FileCheck %s --check-prefix=LOWER
-// RUN: not %mim %s -X torch:preserve=not_an_op -o /dev/null 2>&1 | %FileCheck %s --check-prefix=INVALID
+// RUN: (! %mim %s -X torch:preserve=not_an_op -o /dev/null 2>&1) | %FileCheck %s --check-prefix=INVALID
 
 plugin core;
 plugin option;

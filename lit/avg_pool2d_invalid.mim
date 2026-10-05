@@ -1,4 +1,4 @@
-// RUN: not %mim %s -o /dev/null 2>&1 | %FileCheck %s
+// RUN: (! %mim %s -o /dev/null 2>&1) | %FileCheck %s
 
 plugin math;
 plugin option;
