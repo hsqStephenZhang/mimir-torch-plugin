@@ -3,6 +3,8 @@
 This repository contains the `torch` plugin for MimIR. It exposes PyTorch
 operator-shaped axioms and decomposes them into MimIR tensor operations.
 
+Depends on https://github.com/hsqStephenZhang/mimir-runtime-plugin
+
 ## Standalone build
 
 Install MimIR so that its CMake package is discoverable, then configure this
