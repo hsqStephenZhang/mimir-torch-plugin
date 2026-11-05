@@ -91,7 +91,7 @@ const Def* DecomposeByImpl::decompose_generated(const Def* def) {
         auto new_arg    = decompose_generated(app->arg());
         auto new_callee = decompose_generated(app->callee());
         if (auto pi = new_callee->type()->isa<Pi>())
-            if (!Checker::assignable(pi->dom(), new_arg) && new_arg->num_projs() == pi->num_doms())
+            if (!Check::coerce(pi->dom(), new_arg) && new_arg->num_projs() == pi->num_doms())
                 new_arg = new_world().tuple(pi->dom(), DefVec(size_t(pi->num_doms()), [&](size_t i) {
                     return new_arg->proj(pi->num_doms(), i);
                 }));
@@ -113,7 +113,6 @@ const Def* DecomposeByImpl::decompose_generated(const Def* def) {
 }
 
 const Def* DecomposeByImpl::rewrite_imm_App(const App* app) {
-    if (is_bootstrapping()) return RWPhase::rewrite_imm_App(app);
     auto [axm, curry, remaining] = Axm::get(app);
     (void)remaining;
     if (!axm || curry != 0) return RWPhase::rewrite_imm_App(app);

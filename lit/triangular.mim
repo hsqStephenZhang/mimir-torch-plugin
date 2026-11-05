@@ -27,10 +27,10 @@ extern lam triangular_dynamic {r: Nat, s: «r; Nat»}
 // CHECK-COUNT-2: tensor.generate
 
 // PROFILE: Profile (flat):
-// PROFILE-DAG: 3 torch.lower_torch: decompose.impl
-// PROFILE-DAG: 2 torch.lower_torch: decompose.impl.torch.linalg.triu
-// PROFILE-DAG: 1 torch.lower_torch: decompose.impl.torch.linalg.tril
-// PROFILE-DAG: 1 torch.lower_torch: constraints.dynamic_residual
+// PROFILE-DAG: 3 `torch.lower_torch`: `decompose.impl`
+// PROFILE-DAG: 2 `torch.lower_torch`: `decompose.impl.torch.linalg.triu`
+// PROFILE-DAG: 1 `torch.lower_torch`: `decompose.impl.torch.linalg.tril`
+// PROFILE-DAG: 1 `torch.lower_torch`: `constraints.dynamic_residual`
 
 extern lam _compile (): compile.Phase =
     compile.phases ff (

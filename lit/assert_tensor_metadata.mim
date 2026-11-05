@@ -22,8 +22,8 @@ extern lam dynamic_check {n m: Nat}(): Bool =
 
 // One symbolic guard remains, while the statically true guard is eliminated.
 // PROFILE: Profile (flat):
-// PROFILE-DAG: 2 torch.lower_torch: decompose.impl
-// PROFILE-DAG: 1 torch.lower_torch: constraints.dynamic_residual
+// PROFILE-DAG: 2 `torch.lower_torch`: `decompose.impl`
+// PROFILE-DAG: 1 `torch.lower_torch`: `constraints.dynamic_residual`
 extern lam static_success(): Bool =
     torch.metadata.assert_tensor_metadata @2 ((2, 3), (2, 3));
 

@@ -15,7 +15,7 @@ void reg_phases(Flags2Phases& phases) {
 
 } // namespace mim::plug::torch
 
-extern "C" MIM_EXPORT Plugin mim_get_plugin() {
-    return {"torch", MIM_VERSION, mim::plug::torch::register_normalizers,
-            mim::plug::torch::reg_phases};
+MIM_PLUGIN_ENTRY(torch) {
+    plugin.register_normalizers = mim::plug::torch::register_normalizers;
+    plugin.register_phases      = mim::plug::torch::reg_phases;
 }

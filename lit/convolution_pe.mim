@@ -75,7 +75,7 @@ extern fun convolution_depthwise(
 // SCHED: tensor.map_reduce_post {{.*}} SchedT)
 // CHECK-NOT: Match
 // PROFILE: Profile (flat):
-// PROFILE-DAG: 4 torch.lower_torch: decompose.impl.torch.conv.general
+// PROFILE-DAG: 4 `torch.lower_torch`: `decompose.impl.torch.conv.general`
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,

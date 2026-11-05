@@ -35,7 +35,7 @@ extern fun convolution1d_stride(
         (input, weight, option.some bias));
 
 // PROFILE: Profile (flat):
-// PROFILE-DAG: 1 torch.lower_torch: decompose.impl.torch.conv.conv1d
+// PROFILE-DAG: 1 `torch.lower_torch`: `decompose.impl.torch.conv.conv1d`
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,

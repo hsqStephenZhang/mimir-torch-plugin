@@ -83,9 +83,9 @@ extern fun layer_norm_dynamic {rn: Nat}
 // CHECK: tensor.map_reduce
 
 // PROFILE: Profile (flat):
-// PROFILE-DAG: 5 torch.lower_torch: decompose.impl
-// PROFILE-DAG: 5 torch.lower_torch: decompose.impl.torch.normalization.native_layer_norm
-// PROFILE-DAG: 1 torch.lower_torch: constraints.dynamic_residual
+// PROFILE-DAG: 5 `torch.lower_torch`: `decompose.impl`
+// PROFILE-DAG: 5 `torch.lower_torch`: `decompose.impl.torch.normalization.native_layer_norm`
+// PROFILE-DAG: 1 `torch.lower_torch`: `constraints.dynamic_residual`
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,

@@ -1,0 +1,2655 @@
+/// # Torch Helper Library {#torch_helper}
+///
+/// Scalar dictionaries, shape arithmetic, index maps and element functions
+/// shared by the operator definitions in `torch.mim`, which splices this file
+/// with `pub import "helper.mim" as *`. Nothing here is an annex, and nothing
+/// here refers back to `torch.mim`: helpers that call an `*_impl` stay there.
+///
+/// `PyTorch source` marks a predicate or formula that intentionally mirrors
+/// the PyTorch implementation; `MimIR lowering` marks helpers that only build
+/// tensor loop/projection metadata once the PyTorch-level choice is known.
+///
+import tensor;
+import compile;
+import core;
+import math;
+import affine;
+import runtime;
+import vec;
+import option;
+
+pub let `+  = core.nat.add;
+
+pub let `-  = core.nat.sub;
+
+pub let `*  = core.nat.mul;
+
+pub let `/  = core.nat.div;
+
+pub let `%  = core.nat.rem;
+
+pub let `== = core.ncmp.e;
+
+pub let `!= = core.ncmp.ne;
+
+pub let `<  = core.ncmp.l;
+
+pub let `<= = core.ncmp.le;
+
+pub let `>  = core.ncmp.g;
+
+pub let `>= = core.ncmp.ge;
+
+pub let Arithmetic = [
+    R: tensor.Ring,
+    sub: [R#T, R#T] → R#T,
+    div: [R#T, R#T] → R#T,
+    maximum: [R#T, R#T] → R#T,
+    minimum: [R#T, R#T] → R#T,
+    eq: [R#T, R#T] → Bool,
+    ne: [R#T, R#T] → Bool,
+    lt: [R#T, R#T] → Bool,
+    le: [R#T, R#T] → Bool,
+    gt: [R#T, R#T] → Bool,
+    ge: [R#T, R#T] → Bool,
+    is_nan: R#T → Bool,
+    is_zero: R#T → Bool,
+];
+
+pub let Floating = [
+    A: Arithmetic,
+    neg_inf: A#R#T,
+    exp: A#R#T → A#R#T,
+    log: A#R#T → A#R#T,
+    tanh: A#R#T → A#R#T,
+    erf: A#R#T → A#R#T,
+    sqrt: A#R#T → A#R#T,
+    rsqrt: A#R#T → A#R#T,
+    sin: A#R#T → A#R#T,
+    cos: A#R#T → A#R#T,
+    from_nat: Nat → A#R#T,
+    pow: [A#R#T, A#R#T] → A#R#T,
+];
+
+/// Minimal mixed-dtype dictionary for reductions such as `sum`. Keeping this
+/// separate from Arithmetic avoids requiring meaningless integer division or
+/// floating transcendental operations.
+pub let Reduction = [
+    Input: *,
+    Output: *,
+    zero: Output,
+    add: [Output, Output] → Output,
+    cast: Input → Output,
+];
+
+/// Dictionary accessors. Inside `binary_impl` and `comparison_impl` the
+/// sibling declarations `add`, `mul`, `sub`, `div`, `maximum`, `minimum`, `eq`,
+/// ... share their names with the dictionary fields, and Mim warns that `A#add`
+/// could mean either; reading the field through a helper keeps that scope clean.
+pub lam torch_ring_add (R: tensor.Ring): [R#T, R#T] → R#T = R#add;
+pub lam torch_ring_mul (R: tensor.Ring): [R#T, R#T] → R#T = R#mul;
+pub lam torch_arith_sub (A: Arithmetic): [A#R#T, A#R#T] → A#R#T = A#sub;
+pub lam torch_arith_div (A: Arithmetic): [A#R#T, A#R#T] → A#R#T = A#div;
+pub lam torch_arith_maximum (A: Arithmetic): [A#R#T, A#R#T] → A#R#T = A#maximum;
+pub lam torch_arith_minimum (A: Arithmetic): [A#R#T, A#R#T] → A#R#T = A#minimum;
+pub lam torch_arith_eq (A: Arithmetic): [A#R#T, A#R#T] → Bool = A#eq;
+pub lam torch_arith_ne (A: Arithmetic): [A#R#T, A#R#T] → Bool = A#ne;
+pub lam torch_arith_lt (A: Arithmetic): [A#R#T, A#R#T] → Bool = A#lt;
+pub lam torch_arith_le (A: Arithmetic): [A#R#T, A#R#T] → Bool = A#le;
+pub lam torch_arith_gt (A: Arithmetic): [A#R#T, A#R#T] → Bool = A#gt;
+pub lam torch_arith_ge (A: Arithmetic): [A#R#T, A#R#T] → Bool = A#ge;
+
+/// Shape and element helpers that `tensor` keeps private to its own module.
+pub lam torch_pad_shape {r: Nat} (lo s_in hi: «r; Nat»): «r; Nat» =
+    ‹d: r; lo#d + s_in#d + hi#d›;
+
+pub lam torch_transpose_shape {r: Nat} (s: «r; Nat», permutation: «r; Idx r»): «r; Nat» =
+    let shape_permutation = ‹i: r; option.unwrap_unsafe (vec.first core.icmp.e (permutation, i))›;
+    ‹i: r; s#(shape_permutation#i)›;
+
+pub lam torch_concat_acc {r: Nat} (ax: Idx r) (acc: Nat, row: «r; Nat»): Nat = acc + row#ax;
+
+pub lam torch_concat_shape {nis r: Nat} (ax: Idx r, Sis: «nis; «r; Nat»»): «r; Nat» =
+    let sum_ax = vec.fold.l (torch_concat_acc ax) (0, Sis);
+    let row_0  = Sis#(core.idx 0 nis 0);
+    ‹d: r; core.select (core.icmp.e (d, ax), sum_ax, row_0#d)›;
+
+pub fun torch_tensor_copy {T: *} (acc: T, y: T)@tt: T = return y;
+
+pub fun torch_conv_fun (R: tensor.Ring) (acc: R#T, ab: «2; R#T»)@tt: R#T =
+    return (R#add (acc, R#mul (ab#0_2, ab#1_2)));
+
+pub lam torch_pool2d_in_map (stride dilation: «2; Nat») (o: «6; affine.Index»): «4; affine.Index» =
+    (o#0_6, o#1_6,
+     affine.op.add (affine.semiop.mul (o#2_6, stride#0_2), affine.semiop.mul (o#4_6, dilation#0_2)),
+     affine.op.add (affine.semiop.mul (o#3_6, stride#1_2), affine.semiop.mul (o#5_6, dilation#1_2)));
+
+pub lam torch_identity {T: *} (x: T): T = x;
+
+pub lam torch_reduction_i64_add (args: [I64, I64]): I64 = core.wrap.add 0 args;
+
+pub lam torch_reduction_bool_to_i64 (x: Bool): I64 =
+    core.select @I64 (x, 1I64, 0I64);
+
+pub lam torch_reduction_i64_to_f32 (x: I64): math.F32 =
+    math.conv.s2f math.f32 x;
+
+pub lam torch_f32_sum_reduction (): Reduction =
+    (math.F32, math.F32, 0.0:math.F32,
+     math.arith.add 0 @math.f32, torch_identity @math.F32);
+
+pub lam torch_f64_sum_reduction (): Reduction =
+    (math.F64, math.F64, 0.0:math.F64,
+     math.arith.add 0 @math.f64, torch_identity @math.F64);
+
+pub lam torch_i64_sum_reduction (): Reduction =
+    (I64, I64, 0I64, torch_reduction_i64_add, torch_identity @I64);
+
+pub lam torch_bool_sum_reduction (): Reduction =
+    (Bool, I64, 0I64, torch_reduction_i64_add,
+     torch_reduction_bool_to_i64);
+
+pub lam torch_i64_f32_sum_reduction (): Reduction =
+    (I64, math.F32, 0.0:math.F32,
+     math.arith.add 0 @math.f32, torch_reduction_i64_to_f32);
+
+pub lam torch_select_reduction
+    (condition: Bool, if_true if_false: Reduction): Reduction =
+    (if_false, if_true)#condition;
+
+/// Python: `return math.isnan(x)`.
+pub lam torch_float_is_nan {pe: «2; Nat»} (x: math.F pe): Bool =
+    math.cmp.u 0 @pe (x, x);
+
+/// Python: `return x == 0`.
+pub lam torch_float_is_zero {pe: «2; Nat»} (x: math.F pe): Bool =
+    math.cmp.e 0 @pe (x, 0:(math.F pe));
+
+/// Python: `return float(x)`.
+pub lam torch_float_from_nat {pe: «2; Nat»} (x: Nat): math.F pe =
+    math.conv.u2f pe (core.bitcast I64 x);
+
+/// Keep reciprocal square root opaque in an interface dictionary. Referring
+/// to `math.rrt` directly beta-reduces its body while constructing every
+/// Floating instance, leaving an unused math lambda alive after plugin unload.
+pub lam torch_float_rsqrt {pe: «2; Nat»} (x: math.F pe): math.F pe =
+    math.rrt 0 @pe x;
+
+/// Builds the scalar semantics shared by IEEE floating-point Torch dtypes.
+/// The ring's multiply and add may contract into an FMA, as in PyTorch's own kernels.
+pub lam torch_float_arithmetic {pe: «2; Nat»}(): Arithmetic = (
+    (math.F pe, 0:(math.F pe), math.arith.add math.mode.contract @pe, math.arith.mul math.mode.contract @pe),
+    math.arith.sub 0 @pe,
+    math.arith.div 0 @pe,
+    math.extrema.ieee754max 0 @pe,
+    math.extrema.ieee754min 0 @pe,
+    math.cmp.e 0 @pe,
+    math.cmp.ne 0 @pe,
+    math.cmp.l 0 @pe,
+    math.cmp.le 0 @pe,
+    math.cmp.g 0 @pe,
+    math.cmp.ge 0 @pe,
+    torch_float_is_nan @pe,
+    torch_float_is_zero @pe,
+);
+
+pub lam torch_f32_arithmetic (): Arithmetic =
+    torch_float_arithmetic @math.f32 ();
+
+pub lam torch_f64_arithmetic (): Arithmetic =
+    torch_float_arithmetic @math.f64 ();
+
+pub lam torch_f32_floating (): Floating = (
+    torch_f32_arithmetic (),
+    0xFF800000:math.F32,
+    math.exp.exp 0 @math.f32,
+    math.exp.log 0 @math.f32,
+    math.tri.tanh 0 @math.f32,
+    math.er.f 0 @math.f32,
+    math.rt.sq 0 @math.f32,
+    torch_float_rsqrt @math.f32,
+    math.tri.sin 0 @math.f32,
+    math.tri.cos 0 @math.f32,
+    torch_float_from_nat @math.f32,
+    math.pow 0 @math.f32,
+);
+
+pub lam torch_f64_floating (): Floating = (
+    torch_f64_arithmetic (),
+    0xFFF0000000000000:math.F64,
+    math.exp.exp 0 @math.f64,
+    math.exp.log 0 @math.f64,
+    math.tri.tanh 0 @math.f64,
+    math.er.f 0 @math.f64,
+    math.rt.sq 0 @math.f64,
+    torch_float_rsqrt @math.f64,
+    math.tri.sin 0 @math.f64,
+    math.tri.cos 0 @math.f64,
+    torch_float_from_nat @math.f64,
+    math.pow 0 @math.f64,
+);
+
+pub lam torch_select_arithmetic
+    (condition: Bool, if_true if_false: Arithmetic): Arithmetic =
+    (if_false, if_true)#condition;
+
+pub lam torch_select_floating
+    (condition: Bool, if_true if_false: Floating): Floating =
+    (if_false, if_true)#condition;
+
+/// Python: `return max(x, 0)`.
+pub lam torch_relu_scalar (A: Arithmetic) (x: A#R#T): A#R#T =
+    A#maximum (x, A#R#_0);
+
+/// Python: `return x if x >= 0 else negative_slope * x`.
+pub lam torch_leaky_relu_scalar (F: Floating)
+                            (negative_slope: F#A#R#T)
+                            (x: F#A#R#T): F#A#R#T =
+    core.select
+        (F#A#ge (x, F#from_nat 0), x,
+         F#A#R#mul (negative_slope, x));
+
+/// Python: `return scale * x`.
+pub lam torch_scale_scalar (A: Arithmetic) (scale: A#R#T) (x: A#R#T): A#R#T =
+    A#R#mul (scale, x);
+
+/// Python: `return x / denominator`.
+pub lam torch_div_scalar (A: Arithmetic) (denominator: A#R#T) (x: A#R#T): A#R#T =
+    A#div (x, denominator);
+
+/// Python: `return x + offset`.
+pub lam torch_add_scalar (A: Arithmetic) (offset: A#R#T) (x: A#R#T): A#R#T =
+    A#R#add (x, offset);
+
+/// Python: `return wrap_i64(x + offset)`.
+pub lam torch_add_i64_scalar (offset: I64) (x: I64): I64 =
+    core.wrap.add 0 (x, offset);
+
+/// Python: `return x - other`.
+pub lam torch_sub_scalar (A: Arithmetic) (other: A#R#T) (x: A#R#T): A#R#T =
+    A#sub (x, other);
+
+/// Python: `return value` for every tensor element.
+pub lam torch_constant_scalar (A: Arithmetic)
+                          (value: A#R#T) (x: A#R#T): A#R#T = value;
+
+/// Python: `return self + alpha * other` for scalar `self` and tensor `other`.
+pub lam torch_add_scalar_lhs (A: Arithmetic)
+                         (self alpha: A#R#T) (other: A#R#T): A#R#T =
+    A#R#add (self, A#R#mul (alpha, other));
+
+/// Python: `return self - alpha * other` for scalar `self` and tensor `other`.
+pub lam torch_sub_scalar_lhs (A: Arithmetic)
+                         (self alpha: A#R#T) (other: A#R#T): A#R#T =
+    A#sub (self, A#R#mul (alpha, other));
+
+/// Python: `return wrap_i64(x - other)`.
+pub lam torch_sub_i64_scalar (other: I64) (x: I64): I64 =
+    core.wrap.sub 0 (x, other);
+
+/// Python: `return x != other`.
+pub lam torch_ne_i64_scalar (other: I64) (x: I64): Bool =
+    core.icmp.ne (x, other);
+
+pub lam torch_eq_i64_scalar (other: I64) (x: I64): Bool =
+    core.icmp.e (x, other);
+
+pub lam torch_lt_i64_scalar (other: I64) (x: I64): Bool =
+    core.icmp.sl (x, other);
+
+pub lam torch_le_i64_scalar (other: I64) (x: I64): Bool =
+    core.icmp.sle (x, other);
+
+pub lam torch_gt_i64_scalar (other: I64) (x: I64): Bool =
+    core.icmp.sg (x, other);
+
+pub lam torch_ge_i64_scalar (other: I64) (x: I64): Bool =
+    core.icmp.sge (x, other);
+
+/// Python: signed I64 elementwise comparison helpers.
+pub lam torch_eq_i64 (lhs rhs: I64): Bool = core.icmp.e (lhs, rhs);
+
+pub lam torch_ne_i64 (lhs rhs: I64): Bool = core.icmp.ne (lhs, rhs);
+
+pub lam torch_lt_i64 (lhs rhs: I64): Bool = core.icmp.sl (lhs, rhs);
+
+pub lam torch_le_i64 (lhs rhs: I64): Bool = core.icmp.sle (lhs, rhs);
+
+pub lam torch_gt_i64 (lhs rhs: I64): Bool = core.icmp.sg (lhs, rhs);
+
+pub lam torch_ge_i64 (lhs rhs: I64): Bool = core.icmp.sge (lhs, rhs);
+
+pub lam torch_neg_scalar (A: Arithmetic) (x: A#R#T): A#R#T =
+    A#sub (A#R#_0, x);
+
+/// Python: `return x if x >= 0 else -x`.
+pub lam torch_abs_scalar (A: Arithmetic) (x: A#R#T): A#R#T =
+    core.select @A#R#T (A#ge (x, A#R#_0), x, torch_neg_scalar A x);
+
+/// Python: `abs(x-y)` for beta zero, otherwise SmoothL1's quadratic/linear split.
+pub lam torch_smooth_l1_scalar (F: Floating)
+                           (beta: F#A#R#T)
+                           (args: «2; F#A#R#T»): F#A#R#T =
+    let distance = torch_abs_scalar F#A (F#A#sub (args#ff, args#tt));
+    let half = F#A#div (F#from_nat 1, F#from_nat 2);
+    let quadratic = F#A#div (
+        F#A#R#mul (half, F#A#R#mul (distance, distance)), beta);
+    let linear = F#A#sub (distance, F#A#R#mul (half, beta));
+    let smooth = core.select @F#A#R#T
+        (F#A#lt (distance, beta), quadratic, linear);
+    core.select @F#A#R#T (F#A#is_zero beta, distance, smooth);
+
+/// Python:
+/// ```python
+/// if log_target:
+///     return exp(target) * (target - input)
+/// loss = target * (log(target) - input)
+/// return 0 if target == 0 else loss
+/// ```
+/// Only an exact zero target is masked. Negative targets intentionally retain
+/// the NaN produced by `log(target)`, matching `aten.kl_div`.
+pub lam torch_kl_div_scalar (F: Floating)
+                          (log_target: Bool)
+                          (args: «2; F#A#R#T»): F#A#R#T =
+    let input = args#ff;
+    let target = args#tt;
+    let probability_target = F#A#R#mul (
+        target, F#A#sub (F#log target, input));
+    let ordinary = core.select @F#A#R#T (
+        F#A#is_zero target, F#A#R#_0, probability_target);
+    let logarithmic = F#A#R#mul (
+        F#exp target, F#A#sub (target, input));
+    core.select @F#A#R#T (log_target, logarithmic, ordinary);
+
+/// Python: `abs(lhs - rhs + eps) ** p` for one PairwiseDistance component.
+pub lam torch_pairwise_power_scalar (F: Floating)
+                                  (eps p: F#A#R#T)
+                                  (args: «2; F#A#R#T»): F#A#R#T =
+    let shifted = F#A#R#add (F#A#sub (args#ff, args#tt), eps);
+    F#pow (torch_abs_scalar F#A shifted, p);
+
+/// Python: `max(distance_positive - distance_negative + margin, 0)`.
+pub lam torch_triplet_margin_scalar (F: Floating)
+                                 (margin: F#A#R#T)
+                                 (args: «2; F#A#R#T»): F#A#R#T =
+    F#A#maximum (
+        F#A#R#add (F#A#sub (args#ff, args#tt), margin),
+        F#A#R#_0);
+
+/// Python: `return compare(args[0], args[1])`.
+pub lam torch_compare_scalar (A: Arithmetic)
+                         (compare: [A#R#T, A#R#T] → Bool)
+                         (args: «2; A#R#T»): Bool =
+    compare (args#ff, args#tt);
+
+/// Python: `return math.exp(x)`.
+pub lam torch_exp_scalar (F: Floating) (x: F#A#R#T): F#A#R#T = F#exp x;
+
+/// Python: `return math.log(x)`.
+pub lam torch_log_scalar (F: Floating) (x: F#A#R#T): F#A#R#T = F#log x;
+
+/// Python: `return math.tanh(x)`.
+pub lam torch_tanh_scalar (F: Floating) (x: F#A#R#T): F#A#R#T = F#tanh x;
+
+/// Python: `return math.sqrt(x)`.
+pub lam torch_sqrt_scalar (F: Floating) (x: F#A#R#T): F#A#R#T = F#sqrt x;
+
+/// Python: `return 1.0 / math.sqrt(x)`.
+pub lam torch_rsqrt_scalar (F: Floating) (x: F#A#R#T): F#A#R#T = F#rsqrt x;
+
+/// Python: `return math.sin(x)`.
+pub lam torch_sin_scalar (F: Floating) (x: F#A#R#T): F#A#R#T = F#sin x;
+
+/// Python: `return math.cos(x)`.
+pub lam torch_cos_scalar (F: Floating) (x: F#A#R#T): F#A#R#T = F#cos x;
+
+/// Python: `return 1 / x`.
+pub lam torch_reciprocal_scalar (F: Floating) (x: F#A#R#T): F#A#R#T =
+    F#A#div (F#from_nat 1, x);
+
+/// Python: `return 1 / (1 + math.exp(-x))`.
+pub lam torch_sigmoid_scalar (F: Floating) (x: F#A#R#T): F#A#R#T =
+    let one = F#from_nat 1;
+    let denominator = F#A#R#add (one, F#exp (torch_neg_scalar F#A x));
+    F#A#div (one, denominator);
+
+/// Python: `return x * sigmoid(x)`.
+pub lam torch_silu_scalar (F: Floating) (x: F#A#R#T): F#A#R#T =
+    F#A#R#mul (x, torch_sigmoid_scalar F x);
+
+/// Python equivalent of `torch.nn.functional.gelu(x, approximate=...)`.
+/// `approximate_tanh` is static for normal Torch programs, so PE retains only
+/// the selected formula. Rational constants avoid dtype-specific literals.
+pub lam torch_gelu_scalar (F: Floating)
+                      (approximate_tanh: Bool)
+                      (x: F#A#R#T): F#A#R#T =
+    let one = F#from_nat 1;
+    let two = F#from_nat 2;
+    let half = F#A#div (one, two);
+    let exact = F#A#R#mul (
+        F#A#R#mul (half, x),
+        F#A#R#add (one, F#erf (F#A#div (x, F#sqrt two))));
+    let x3 = F#A#R#mul (F#A#R#mul (x, x), x);
+    let cubic_coefficient = F#A#div (F#from_nat 44715, F#from_nat 1000000);
+    let tanh_coefficient = F#A#div (F#from_nat 39894228, F#from_nat 50000000);
+    let tanh_argument = F#A#R#mul (
+        tanh_coefficient,
+        F#A#R#add (x, F#A#R#mul (cubic_coefficient, x3)));
+    let approximate = F#A#R#mul (
+        F#A#R#mul (half, x),
+        F#A#R#add (one, F#tanh tanh_argument));
+    core.select @F#A#R#T (approximate_tanh, approximate, exact);
+
+/// Python equivalent of `aten.elu(input, alpha, scale, input_scale)`.
+pub lam torch_elu_scalar (F: Floating)
+                      (alpha scale input_scale: F#A#R#T)
+                      (x: F#A#R#T): F#A#R#T =
+    let positive = F#A#R#mul (scale, x);
+    let scaled_input = F#A#R#mul (input_scale, x);
+    let negative = F#A#R#mul (
+        F#A#R#mul (alpha, scale),
+        F#A#sub (F#exp scaled_input, F#from_nat 1));
+    core.select @F#A#R#T (F#A#gt (x, F#A#R#_0), positive, negative);
+
+/// Python equivalent of `hardsigmoid(x) = clamp(x + 3, 0, 6) / 6`.
+pub lam torch_hardsigmoid_scalar (F: Floating)
+                              (x: F#A#R#T): F#A#R#T =
+    let six = F#from_nat 6;
+    let shifted = F#A#R#add (x, F#from_nat 3);
+    let lower = core.select @F#A#R#T
+        (F#A#ge (shifted, F#A#R#_0), shifted, F#A#R#_0);
+    let bounded = core.select @F#A#R#T
+        (F#A#le (lower, six), lower, six);
+    core.select @F#A#R#T (F#A#is_nan x, x, F#A#div (bounded, six));
+
+/// Python equivalent of `softplus(x, beta, threshold)`.
+pub lam torch_softplus_scalar (F: Floating)
+                          (beta threshold: F#A#R#T)
+                          (x: F#A#R#T): F#A#R#T =
+    let scaled = F#A#R#mul (beta, x);
+    let smooth = F#A#div (
+        F#log (F#A#R#add (F#from_nat 1, F#exp scaled)), beta);
+    core.select @F#A#R#T (F#A#gt (scaled, threshold), x, smooth);
+
+/// Python: `return x ** exponent`.
+pub lam torch_pow_scalar (F: Floating)
+                     (exponent: F#A#R#T) (x: F#A#R#T): F#A#R#T =
+    F#pow (x, exponent);
+
+/// PyTorch source: `return where(x <= threshold, value, x)`.
+pub lam torch_threshold_scalar (A: Arithmetic)
+                           (threshold: A#R#T, value: A#R#T)
+                           (x: A#R#T): A#R#T =
+    core.select @A#R#T (A#le (x, threshold), value, x);
+
+/// Python: `return x if isnan(x) or x >= minimum else minimum`.
+pub lam torch_clamp_min_scalar (A: Arithmetic)
+                           (minimum: A#R#T) (x: A#R#T): A#R#T =
+    core.select @A#R#T (
+        A#is_nan x,
+        x,
+        core.select @A#R#T (A#ge (x, minimum), x, minimum));
+
+/// Python: `return x if isnan(x) or x <= maximum else maximum`.
+pub lam torch_clamp_max_scalar (A: Arithmetic)
+                           (maximum: A#R#T) (x: A#R#T): A#R#T =
+    core.select @A#R#T (
+        A#is_nan x,
+        x,
+        core.select @A#R#T (A#le (x, maximum), x, maximum));
+
+/// Python: `return x`.
+pub lam torch_bool_id (x: Bool): Bool = x;
+
+/// PyTorch source: `torch/_prims_common/__init__.py::prod`.
+/// Python: `return math.prod(shape)`.
+pub lam torch_numel {r: Nat} (s: «r; Nat»): Nat =
+    vec.fold.l core.nat.mul (1, s);
+
+/// PyTorch source: `torch/_prims_common/__init__.py::is_same_shape`.
+/// Ranks are equal by type, so only corresponding extents remain to check.
+/// Python: `return all(a == b for a, b in zip(actual, expected))`.
+pub lam torch_shapes_equal {r: Nat} (actual expected: «r; Nat»): Bool =
+    let checks = ‹i: r; actual#i == expected#i›;
+    vec.fold.l (core.bit2.and_ 0) (tt, checks);
+
+/// PyTorch source: `torch/_prims/__init__.py::_broadcast_in_dim_meta` requires
+/// `broadcast_dimensions` to be strictly ascending.
+/// Python: `return all(a < b for a, b in zip(dims, dims[1:]))`.
+pub lam torch_dims_strictly_ascending {ri ro: Nat}
+                                   (dims: «ri; Idx ro»): Bool =
+    let checks = ‹i: ri - 1;
+        let left_i = core.idx 0 ri  (core.bitcast Nat i);
+        let right_i = core.idx 0 ri  (core.bitcast Nat i + 1);
+        core.icmp.ul @ro (dims#left_i, dims#right_i)›;
+    vec.fold.l (core.bit2.and_ 0) (tt, checks);
+
+/// PyTorch source: `torch/_prims/__init__.py::_broadcast_in_dim_meta`.
+/// Unlike `torch/_prims_common.is_expandable_to`, this helper validates an
+/// explicit source-to-output dimension map rather than trailing alignment.
+/// Python: `return strictly_ascending(dims) and all(si == 1 or si == s_out[d] for si, d in zip(s_in, dims))`.
+pub lam torch_broadcast_compatible {ri ro: Nat}
+                               (s_in: «ri; Nat», s_out: «ro; Nat», dims: «ri; Idx ro»): Bool =
+    let compatible = ‹i: ri;
+        core.bit2.or_ 0 (
+            s_in#i == 1,
+            s_in#i == s_out#(dims#i))›;
+    core.bit2.and_ 0 (
+        torch_dims_strictly_ascending @(ri, ro) dims,
+        vec.fold.l (core.bit2.and_ 0) (tt, compatible));
+
+/// PyTorch source: `torch/_prims_common/__init__.py::canonicalize_dim` and
+/// `aten/src/ATen/WrapDimUtils.h`. Scalar wrapping is not used here because
+/// the result type `Idx r` already requires a nonzero tensor rank.
+/// Python: `return -rank <= dimension < rank`.
+pub lam torch_dim_in_range {r: Nat} (dimension: I64): Bool =
+    let rank = core.bitcast I64 r;
+    let neg_rank = core.wrap.sub 0 (0I64, rank);
+    core.bit2.and_ 0 (
+        core.icmp.sge (dimension, neg_rank),
+        core.icmp.sl (dimension, rank));
+
+/// PyTorch source: `torch/_prims_common/__init__.py::canonicalize_dim`.
+/// Python: `return dimension + rank if dimension < 0 else dimension`.
+pub lam torch_canonical_dim {r: Nat} (dimension: I64): Idx r =
+    let rank = core.bitcast I64 r;
+    let adjusted = core.select (
+        core.icmp.sl (dimension, 0I64),
+        core.wrap.add 0 (dimension, rank),
+        dimension);
+    core.conv.u r adjusted;
+
+/// PyTorch source correspondence: negative tensor indices are wrapped by the
+/// indexing path in `aten/src/ATen/TensorIndexing.h`.
+/// Python: `return -extent <= index < extent`.
+pub lam torch_index_in_range (extent: Nat, index: I64): Bool =
+    let extent_i64 = core.bitcast I64 extent;
+    let neg_extent = core.wrap.sub 0 (0I64, extent_i64);
+    core.bit2.and_ 0 (
+        core.icmp.sge (index, neg_extent),
+        core.icmp.sl (index, extent_i64));
+
+/// PyTorch source correspondence: `aten/src/ATen/TensorIndexing.h`.
+/// Python: `return index + extent if index < 0 else index`.
+pub lam torch_canonical_index (extent: Nat, index: I64): Nat =
+    let extent_i64 = core.bitcast I64 extent;
+    let adjusted = core.select (
+        core.icmp.sl (index, 0I64),
+        core.wrap.add 0 (index, extent_i64),
+        index);
+    core.bitcast Nat adjusted;
+
+/// MimIR lowering: constructs the projection used to remove one reduction
+/// axis; PyTorch computes the same shape with
+/// `torch/_prims_common/__init__.py::compute_reduction_output_shape`.
+/// Python: `return i + 1 if i >= dimension else i`.
+pub lam torch_kept_dim {r: Nat}
+                   (dimension: Idx r, i: Idx (r - 1)): Idx r =
+    let i_nat = core.bitcast Nat i;
+    let dim_nat = core.bitcast Nat dimension;
+    let source = core.select (
+        i_nat >= dim_nat,
+        i_nat + 1,
+        i_nat);
+    core.idx 0 r  source;
+
+/// PyTorch source: `torch/_prims_common/__init__.py::compute_reduction_output_shape`.
+/// Python: `return shape[:dimension] + shape[dimension + 1:]`.
+pub lam torch_reduce_shape {r: Nat}
+                       (s: «r; Nat», dimension: Idx r): «r - 1; Nat» =
+    ‹i: r - 1; s#(torch_kept_dim @r (dimension, i))›;
+
+/// MimIR lowering: materializes the kept-axis list consumed by
+/// `tensor.broadcast_in_dim` and projection maps.
+/// Python: `return [d for d in range(rank) if d != dimension]`.
+pub lam torch_kept_dims {r: Nat}
+                    (dimension: Idx r): «r - 1; Idx r» =
+    ‹i: r - 1; torch_kept_dim @r (dimension, i)›;
+
+/// MimIR lowering: map each source axis to its kept-output loop or the final
+/// reduction loop. PyTorch's reference implementation expresses this through
+/// `sum(..., dim=dimension)` instead of exposing loop subscripts.
+pub lam torch_reduce_subscripts {r: Nat} (dimension: Idx r): «r; Nat» =
+    let ro = r - 1;
+    let kept = torch_kept_dims @r dimension;
+    ‹d: r;
+        let position = match vec.first (core.icmp.e @r) (kept, d) with
+            | i: Idx (r - 1) => core.bitcast Nat i
+            | _: [] => ro;
+        core.select (
+            core.icmp.e @r (d, dimension),
+            ro,
+            position)›;
+
+/// Reduces one arbitrary dimension and removes it from the result shape.
+/// A static `dimension` specializes all projection maps to affine projections.
+/// Python: `return fold(g, input, axis=dimension, initial=init)`.
+pub lam torch_reduce_dim {T: *, r: Nat}
+                     (g: [T, T] → T, init: T)
+                     (s: «r; Nat», dimension: Idx r)
+                     (input: «s; T»)
+                   : «torch_reduce_shape (s, dimension); T» =
+    let ro = r - 1;
+    let loops = ro + 1;
+    let s_out = torch_reduce_shape (s, dimension);
+    let s_full = vec.cat (s_out, (s#dimension,));
+    let out_subs = ‹i: ro; core.bitcast Nat i›;
+    let in_subs = torch_reduce_subscripts @r dimension;
+    tensor.map_reduce @1 @(T, ro, loops) (s_out, s_full)
+        @(T, r, s) (tensor.pool_fun g, init)
+        (tensor.proj_map @(loops, ro) out_subs)
+        (tensor.proj_map @(loops, r) in_subs,)
+        input;
+
+/// Python: `(sum(abs(lhs-rhs+eps)**p, dim=1))**(1/p)`.
+pub lam torch_pairwise_distance_2d (F: Floating)
+                                {n d: Nat}
+                                (eps p: F#A#R#T)
+                                (lhs rhs: «n, d; F#A#R#T»)
+                              : «n; F#A#R#T» =
+    let powers = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        (torch_pairwise_power_scalar F (eps, p))
+        @(2, (n, d)) (lhs, rhs);
+    let sums = torch_reduce_dim
+        (F#A#R#add, F#A#R#_0) ((n, d), 1_2) powers;
+    let reciprocal_p = F#A#div (F#from_nat 1, p);
+    let powered = tensor.unary @(F#A#R#T, F#A#R#T)
+        (torch_pow_scalar F reciprocal_p) @(1, (n,)) sums;
+    core.select @«n; F#A#R#T» (F#A#is_zero p, sums, powered);
+
+/// PyTorch source correspondence: reduction references use keepdim or
+/// unsqueeze followed by expand; explicit mapping follows
+/// `torch/_prims/__init__.py::_broadcast_in_dim_meta`.
+/// Python: `return reduced.unsqueeze(dimension).expand(shape)`.
+pub lam torch_broadcast_reduced {T: *, r: Nat}
+                            (s: «r; Nat», dimension: Idx r)
+                            (input: «torch_reduce_shape (s, dimension); T»): «s; T» =
+    let ro = r - 1;
+    let s_in = torch_reduce_shape (s, dimension);
+    let dims = torch_kept_dims @r dimension;
+    tensor.broadcast_in_dim @(T, ro, r) (s_in, s, input, dims);
+
+/// Python: `return shape[:dimension] + [1] + shape[dimension + 1:]`.
+pub lam torch_keepdim_shape {r: Nat}
+                        (s: «r; Nat», dimension: Idx r): «r; Nat» =
+    ‹i: r;
+        core.select (
+            core.icmp.e @r (i, dimension),
+            1,
+            s#i)›;
+
+/// PyTorch source: `torch/_prims_common/__init__.py::canonicalize_dims`.
+/// Python: `return all(-rank <= d < rank for d in dimensions)`.
+pub lam torch_dims_in_range {r nr: Nat} (dimensions: «nr; I64»): Bool =
+    let checks = ‹i: nr; torch_dim_in_range @r (dimensions#i)›;
+    vec.fold.l (core.bit2.and_ 0) (tt, checks);
+
+/// PyTorch source: `torch/_prims_common/__init__.py::canonicalize_dims`.
+/// Python: `return tuple(d + rank if d < 0 else d for d in dimensions)`.
+pub lam torch_canonical_dims {r nr: Nat}
+                         (dimensions: «nr; I64»): «nr; Idx r» =
+    ‹i: nr; torch_canonical_dim @r (dimensions#i)›;
+
+/// PyTorch source correspondence: `torch/_prims_common/__init__.py::reduction_dims`
+/// canonicalizes dimensions and calls `validate_no_repeating_dims`. This
+/// variant additionally requires the operator-specific non-empty list.
+pub lam torch_dims_valid {r nr: Nat} (dimensions: «nr; I64»): Bool =
+    let canonical = torch_canonical_dims @(r, nr) dimensions;
+    core.bit2.and_ 0 (
+        nr >= 1,
+        core.bit2.and_ 0 (
+            nr <= r,
+            core.bit2.and_ 0 (
+                torch_dims_in_range @(r, nr) dimensions,
+                vec.is_unique canonical)));
+
+/// PyTorch source: `torch/_prims_common/__init__.py::reduction_dims` and
+/// `validate_no_repeating_dims`; an empty explicit list is accepted here.
+pub lam torch_axis_list_valid {r nr: Nat} (dimensions: «nr; I64»): Bool =
+    let canonical = torch_canonical_dims @(r, nr) dimensions;
+    core.bit2.and_ 0 (
+        nr <= r,
+        core.bit2.and_ 0 (
+            torch_dims_in_range @(r, nr) dimensions,
+            vec.is_unique canonical));
+
+/// PyTorch source: `torch/_prims_common/__init__.py::compute_reduction_output_shape`.
+/// Python: `return tuple(d for d in range(rank) if d not in dimensions)`.
+pub lam torch_kept_axes {r nr: Nat}
+                    (dimensions: «nr; Idx r») =
+    vec.diff (‹i: r; i›, dimensions);
+
+/// Python: `return rank - len(set(dimensions))`.
+pub lam torch_reduced_rank {r nr: Nat} (dimensions: «nr; Idx r»): Nat =
+    vec.len (torch_kept_axes @(r, nr) dimensions);
+
+/// PyTorch source: `torch/_prims_common/__init__.py::compute_reduction_output_shape`.
+/// Python: `return tuple(shape[d] for d in range(rank) if d not in dimensions)`.
+pub lam torch_multi_reduce_shape {r nr: Nat}
+                             (s: «r; Nat», dimensions: «nr; Idx r»)
+                           : «torch_reduced_rank dimensions; Nat» =
+    let kept = torch_kept_axes @(r, nr) dimensions;
+    ‹i: torch_reduced_rank dimensions; s#(kept#i)›;
+
+/// Python: `return tuple(1 if d in dimensions else shape[d] for d in range(rank))`.
+pub lam torch_multi_keepdim_shape {r nr: Nat}
+                              (s: «r; Nat», dimensions: «nr; Idx r»): «r; Nat» =
+    ‹i: r;
+        let reduced = option.is_some
+            (vec.first (core.icmp.e @r) (dimensions, i));
+        core.select (reduced, 1, s#i)›;
+
+/// Chooses the physical reduced tensor or its keepdim reshape. This is the
+/// implementation counterpart of the public dependent result type. Its
+/// generic inferred type is a union; a static `keepdim` projects one concrete
+/// tensor type before the implementation is inserted at a call site.
+pub lam torch_apply_keepdim {T: *, r nr: Nat}
+                        (s: «r; Nat», dimensions: «nr; Idx r», keepdim: Bool)
+                        (reduced: «torch_multi_reduce_shape (s, dimensions); T»)
+                      =
+    let kept = tensor.reshape
+        @(T, torch_reduced_rank dimensions, r)
+        (torch_multi_reduce_shape (s, dimensions))
+        (torch_multi_keepdim_shape (s, dimensions))
+        reduced;
+    (reduced, kept)#keepdim;
+
+/// MimIR lowering: map kept axes to output loops and reduced axes to trailing
+/// reduction loops. This is the loop-level realization of PyTorch's
+/// `compute_reduction_output_shape` plus reduction over `dimensions`.
+pub lam torch_multi_reduce_subscripts {r nr: Nat}
+                                  (dimensions: «nr; Idx r»): «r; Nat» =
+    let ro = torch_reduced_rank dimensions;
+    let kept = torch_kept_axes @(r, nr) dimensions;
+    ‹d: r;
+        let reduced = vec.first (core.icmp.e @r) (dimensions, d);
+        let is_reduced = option.is_some reduced;
+        let reduced_pos = option.unwrap_or reduced (core.idx 0 nr  0);
+        let kept_pos = match vec.first (core.icmp.e @r) (kept, d) with
+            | i: Idx ro => core.bitcast Nat i
+            | _: [] => 0;
+        core.select (
+            is_reduced,
+            ro + core.bitcast Nat reduced_pos,
+            core.bitcast Nat kept_pos)›;
+
+/// Python: `return fold(g, input, axes=dimensions, initial=init)`.
+pub lam torch_multi_reduce {T: *, r nr: Nat}
+                       (g: [T, T] → T, init: T)
+                       (s: «r; Nat», dimensions: «nr; Idx r»)
+                       (input: «s; T»)
+                     : «torch_multi_reduce_shape (s, dimensions); T» =
+    let ro = torch_reduced_rank dimensions;
+    let s_out = torch_multi_reduce_shape (s, dimensions);
+    let s_red = ‹i: nr; s#(dimensions#i)›;
+    let s_full = vec.cat (s_out, s_red);
+    let loops = ro + nr;
+    let out_subs = ‹i: ro; core.bitcast Nat i›;
+    let in_subs = torch_multi_reduce_subscripts @(r, nr) dimensions;
+    tensor.map_reduce @1 @(T, ro, loops) (s_out, s_full)
+        @(T, r, s) (tensor.pool_fun g, init)
+        (tensor.proj_map @(loops, ro) out_subs)
+        (tensor.proj_map @(loops, r) in_subs,)
+        input;
+
+/// Python: `return math.prod(shape[d] for d in dimensions)`.
+pub lam torch_reduction_numel {r nr: Nat}
+                          (s: «r; Nat», dimensions: «nr; Idx r»): Nat =
+    vec.fold.l core.nat.mul (1, ‹i: nr; s#(dimensions#i)›);
+
+/// Python: `return all(shape[d] != 0 for d in dimensions)`.
+pub lam torch_reduction_extents_nonzero {r nr: Nat}
+    (s: «r; Nat», dimensions: «nr; Idx r»): Bool =
+    vec.fold.l (core.bit2.and_ 0)
+        (tt, ‹i: nr; s#(dimensions#i) != 0›);
+
+/// Python: `return x * x`.
+pub lam torch_square_scalar (A: Arithmetic) (x: A#R#T): A#R#T =
+    A#R#mul (x, x);
+
+/// Python: `return 0.0 if x == 0 else 1.0`, used by the p=0 norm.
+pub lam torch_nonzero_count_scalar (F: Floating)
+                               (x: F#A#R#T): F#A#R#T =
+    core.select @F#A#R#T
+        (F#A#is_zero x, F#A#R#_0, F#from_nat 1);
+
+/// Python: `return float(not isfinite(x))`.
+pub lam torch_nonfinite_count_scalar (F: Floating)
+                                  (x: F#A#R#T): F#A#R#T =
+    let positive_inf = F#A#sub (F#A#R#_0, F#neg_inf);
+    let nonfinite = core.bit2.or_ 0 (
+        F#A#is_nan x,
+        F#A#eq (torch_abs_scalar F#A x, positive_inf));
+    core.select @F#A#R#T (nonfinite, F#from_nat 1, F#A#R#_0);
+
+/// Welford `var_mean` reports a NaN mean for groups containing NaN or Inf.
+pub lam torch_var_mean_adjust_mean (F: Floating)
+    (args: «2; F#A#R#T»): F#A#R#T =
+    let nan = F#A#div (F#A#R#_0, F#A#R#_0);
+    core.select @F#A#R#T
+        (F#A#gt (args#tt, F#A#R#_0), nan, args#ff);
+
+/// PyTorch source: `torch/_meta_registrations.py::pooling_output_shape_pad_lr`
+/// and `aten/src/ATen/native/Pool.h::pooling_output_shape_pad_lr`.
+/// Python equivalent of PyTorch's pooling output-size helper. Ceil mode first
+/// rounds the division upward, then drops a final window whose start would lie
+/// entirely in the right padded region.
+pub lam torch_pool_dim (size kernel stride dilation padding: Nat,
+                    ceil_mode: Bool): Nat =
+    let effective_kernel = dilation * (kernel - 1) + 1;
+    let padded = size + 2 * padding;
+    let ceil_adjust = core.select (ceil_mode, stride - 1, 0);
+    let rounded = (padded - effective_kernel + ceil_adjust) / stride + 1;
+    let starts_in_right_padding = (rounded - 1) * stride >= size + padding;
+    core.select (
+        core.bit2.and_ 0 (ceil_mode, starts_in_right_padding),
+        rounded - 1,
+        rounded);
+
+pub lam torch_pool_shape
+    (h w: Nat, kernel stride dilation padding: «2; Nat»,
+     ceil_mode: Bool): «2; Nat» =
+    (torch_pool_dim (h, kernel#ff, stride#ff, dilation#ff, padding#ff, ceil_mode),
+     torch_pool_dim (w, kernel#tt, stride#tt, dilation#tt, padding#tt, ceil_mode));
+
+pub lam torch_pool3d_shape
+    (d h w: Nat, kernel stride dilation padding: «3; Nat»,
+     ceil_mode: Bool): «3; Nat» =
+    (torch_pool_dim
+        (d, kernel#0_3, stride#0_3, dilation#0_3, padding#0_3, ceil_mode),
+     torch_pool_dim
+        (h, kernel#1_3, stride#1_3, dilation#1_3, padding#1_3, ceil_mode),
+     torch_pool_dim
+        (w, kernel#2_3, stride#2_3, dilation#2_3, padding#2_3, ceil_mode));
+
+/// MimIR lowering: derives the high padding required to materialize the final
+/// window selected by PyTorch's `pooling_output_shape_pad_lr`.
+/// Additional right padding required to materialize a ceil-mode pooling
+/// window. Nat subtraction saturates at zero, so floor-mode windows add none.
+pub lam torch_pool_extra_hi
+    (size kernel stride dilation padding output: Nat): Nat =
+    let effective_kernel = dilation * (kernel - 1) + 1;
+    let required = (output - 1) * stride + effective_kernel;
+    required - (size + 2 * padding);
+
+/// Python: `return 1`, the channel axis of an NCHW tensor.
+pub lam torch_channel_dim {r: Nat}: Idx r = core.idx 0 r  1;
+
+/// PyTorch API: https://pytorch.org/docs/stable/generated/torch.permute.html
+/// Types: rank-`r` tensor plus an `r`-axis permutation to `torch_transpose_shape(s, dims)`.
+pub lam torch_permute_shape {r: Nat}
+                        (s: «r; Nat», dims: «r; Idx r»): «r; Nat» =
+    ‹i: r; s#(dims#i)›;
+
+// PyTorch lists the input axis selected by each output axis, whereas
+// tensor.transpose maps each input axis to its output axis. Invert that
+// relation while projecting an output loop index back into the input tensor.
+
+pub lam torch_transpose_source_axis {r: Nat}
+                                (permutation: «r; Idx r»,
+                                 axis: Idx r): Idx r =
+    let source = vec.fold.l core.nat.add (
+        0,
+        ‹i: r; core.select @Nat (
+            core.icmp.e @r (permutation#i, axis),
+            core.bitcast Nat i,
+            0)›);
+    core.idx 0 r  source;
+
+pub lam torch_checked_index_value {bound n: Nat}
+                              (message: «n; I8»)
+                              (value: I64): Idx bound =
+    let valid = core.bit2.and_ 0 (
+        core.icmp.sge (value, 0I64),
+        core.icmp.sl (value, core.bitcast I64 bound));
+    runtime.require (valid, message) body
+    where
+        lam body(): Idx bound = core.conv.u bound value;
+    end;
+
+/// Converts an I64 index tensor to the bounded index type required by the
+/// tensor gather/scatter contract. Static values and bounds disappear under
+/// PE; dynamic violations retain the runtime failure path.
+pub lam torch_checked_index_cast
+    {bound r: Nat, s: «r; Nat»} {n: Nat}
+    (message: «n; I8»)
+    (input: «s; I64»): «s; Idx bound» =
+    tensor.unary @(I64, Idx bound)
+        (torch_checked_index_value @(bound, n) message) @(r, s) input;
+
+pub lam torch_indexed_unary_element
+    {Ti T: *, r: Nat, s: «r; Nat»}
+    (app: [«r; I64», Ti] → T, input: «s; Ti»)
+    (indices: «r; I64»): T =
+    let coords = ‹d: r; core.conv.u (s#d) (indices#d)›;
+    app (indices, input#coords);
+
+pub lam torch_indexed_unary
+    {Ti T: *, r: Nat, s: «r; Nat»}
+    (app: [«r; I64», Ti] → T)
+    (input: «s; Ti»): «s; T» =
+    tensor.generate @(T, r) s
+        (torch_indexed_unary_element @(Ti, T, r, s) (app, input));
+
+pub lam torch_permute_map {r: Nat}
+                      (dims: «r; Idx r»)
+                      (o: «r; affine.Index»): «r; affine.Index» =
+    ‹i: r; o#(torch_transpose_source_axis (dims, i))›;
+
+/// PyTorch source: `torch/_refs/__init__.py::transpose`.
+/// Python: swap `dim0` and `dim1` in `list(range(rank))` after canonicalizing negatives.
+pub lam torch_transpose_dims {r: Nat}
+                         (dim0 dim1: I64): «r; Idx r» =
+    let axis0 = torch_canonical_dim @r dim0;
+    let axis1 = torch_canonical_dim @r dim1;
+    ‹d: r;
+        core.select (
+            core.icmp.e @r (d, axis0),
+            axis1,
+            core.select (
+                core.icmp.e @r (d, axis1),
+                axis0,
+                d))›;
+
+/// PyTorch source: `torch/_refs/__init__.py::repeat` computes `target_shape`
+/// from the rank-aligned input shape and repeat vector with this formula.
+/// Python: `return tuple(extent * count for extent, count in zip(shape, repeats))`.
+pub lam torch_repeat_shape {r: Nat}
+                       (s: «r; Nat», repeats: «r; Nat»): «r; Nat» =
+    ‹d: r; s#d * repeats#d›;
+
+pub lam torch_roll_map {r nr: Nat}
+                   (s: «r; Nat», shifts: «nr; Nat», dimensions: «nr; Idx r»)
+                   (indices: «r; affine.Index»): «r; affine.Index» =
+    ‹d: r;
+        let candidates = ‹i: nr;
+            core.select (
+                core.icmp.e @r (d, dimensions#i),
+                shifts#i,
+                0)›;
+        let shift = vec.fold.l core.nat.add (0, candidates);
+        let normalized_shift = shift % s#d;
+        let offset = s#d - normalized_shift;
+        affine.semiop.rem (
+            affine.op.add (indices#d, affine.lit offset),
+            s#d)›;
+
+/// PyTorch source: `torch/_refs/__init__.py::_get_unfold_shape_stride`.
+/// Python: append `size`, and replace the selected extent with
+/// `(extent - size) // step + 1`.
+pub lam torch_unfold_shape {r: Nat}
+                       (s: «r; Nat», dimension: Idx r, size step: Nat)
+                     : «r + 1; Nat» =
+    let windows = (s#dimension - size) / step + 1;
+    let base = ‹d: r;
+        core.select (core.icmp.e @r (d, dimension), windows, s#d)›;
+    vec.cat (base, (size,));
+
+/// Python: source[d] is `window * step + offset` on the unfolded axis,
+/// and the original output coordinate on every other axis.
+pub lam torch_unfold_map {r: Nat}
+                     (dimension: Idx r, step: Nat)
+                     (indices: «r + 1; affine.Index»)
+                   : «r; affine.Index» =
+    let window_offset = indices#(core.idx 0 (r + 1)  r);
+    ‹d: r;
+        let output_d = indices#(core.idx 0 (r + 1) 
+            (core.bitcast Nat d));
+        core.select @affine.Index (
+            core.icmp.e @r (d, dimension),
+            affine.op.add (
+                affine.semiop.mul (output_d, step), window_offset),
+            output_d)›;
+
+/// PyTorch source: `torch/_refs/__init__.py::narrow`.
+/// Python: replace `shape[dimension]` with `length`.
+pub lam torch_narrow_shape {r: Nat}
+                       (s: «r; Nat», dimension: Idx r, length: Nat): «r; Nat» =
+    ‹d: r; core.select (core.icmp.e @r (d, dimension), length, s#d)›;
+
+/// PyTorch source: `torch/_refs/__init__.py::narrow`.
+/// Python: canonicalize negative `start`, then require `0 <= start <= start + length <= extent`.
+pub lam torch_narrow_start_in_range
+    (extent length: Nat, start: I64): Bool =
+    let extent_i64 = core.bitcast I64 extent;
+    let adjusted = core.select (
+        core.icmp.sl (start, 0I64),
+        core.wrap.add 0 (start, extent_i64),
+        start);
+    core.bit2.and_ 0 (
+        core.icmp.sge (adjusted, 0I64),
+        core.bitcast Nat adjusted + length <= extent);
+
+/// Convert PyTorch's compact reverse-axis padding order
+/// `[last_lo, last_hi, ..., first_lo, first_hi]` to tensor.pad's full vectors.
+pub lam torch_pad_side {r np: Nat}
+                   (padding: «2 * np; Nat», high: Bool)
+                   (dimension: Idx r): Nat =
+    let dim = core.bitcast Nat dimension;
+    let first_padded = r - np;
+    let active = dim >= first_padded;
+    let axis = dim - first_padded;
+    let reversed_axis = np - 1 - axis;
+    let offset = 2 * reversed_axis + core.bitcast Nat high;
+    let index = core.idx 0 (2 * np)  offset;
+    core.select (active, padding#index, 0);
+
+pub lam torch_pad_lows {r np: Nat}
+                    (padding: «2 * np; Nat»): «r; Nat» =
+    ‹d: r; torch_pad_side @(r, np) (padding, ff) d›;
+
+pub lam torch_pad_highs {r np: Nat}
+                     (padding: «2 * np; Nat»): «r; Nat» =
+    ‹d: r; torch_pad_side @(r, np) (padding, tt) d›;
+
+/// Python: `return start + step * index[0]` with I64 wrapping arithmetic.
+pub lam torch_arange_i64_element
+    (start step: I64) (index: «1; I64»): I64 =
+    core.wrap.add 0 (
+        start,
+        core.wrap.mul 0 (step, index#0_1));
+
+pub lam torch_axis_index {r: Nat} (dimension: Idx r)
+                     (indices: «r; I64»): I64 =
+    indices#dimension;
+
+pub lam torch_extrema_value (F: Floating) (maximum: Bool)
+                        (best candidate: F#A#R#T): F#A#R#T =
+    let best_nan = F#A#is_nan best;
+    let candidate_nan = F#A#is_nan candidate;
+    let better = core.select (
+        maximum, F#A#gt (candidate, best), F#A#lt (candidate, best));
+    let choose = core.bit2.or_ 0 (
+        candidate_nan,
+        core.bit2.and_ 0 (core.icmp.e @2 (best_nan, ff), better));
+    core.select @F#A#R#T (choose, candidate, best);
+
+pub lam torch_arg_index_step (F: Floating)
+                         (best_index: I64,
+                          values: [F#A#R#T, F#A#R#T, I64]): I64 =
+    let candidate = values#0_3;
+    let extremum = values#1_3;
+    let same = core.bit2.or_ 0 (
+        F#A#eq (candidate, extremum),
+        core.bit2.and_ 0 (F#A#is_nan candidate, F#A#is_nan extremum));
+    let earlier = core.icmp.sl (values#2_3, best_index);
+    core.select @I64 (
+        core.bit2.and_ 0 (same, earlier), values#2_3, best_index);
+
+pub fun torch_arg_index_fold (F: Floating)
+                         (best_index: I64,
+                          values: [F#A#R#T, F#A#R#T, I64])@tt: I64 =
+    return (torch_arg_index_step F (best_index, values));
+
+pub lam torch_arg_extrema (F: Floating) {r: Nat, s: «r; Nat»}
+                      (maximum: Bool, dimension: Idx r)
+                      (input: «s; F#A#R#T»)
+                    : [Bool,
+                       «torch_reduce_shape (s, dimension); F#A#R#T»,
+                      «torch_reduce_shape (s, dimension); I64»] =
+    let ro = r - 1;
+    let loops = ro + 1;
+    let initial = core.select @F#A#R#T (
+        maximum, F#neg_inf, F#A#sub (F#A#R#_0, F#neg_inf));
+    let values = torch_reduce_dim
+        (torch_extrema_value F maximum, initial) (s, dimension) input;
+    let extrema = torch_broadcast_reduced
+        @(F#A#R#T, r) (s, dimension) values;
+    let indices = tensor.generate @(I64, r) s (torch_axis_index @r dimension);
+    let result_indices = tensor.map_reduce @3 @(I64, ro, loops)
+        (torch_reduce_shape (s, dimension),
+         vec.cat (torch_reduce_shape (s, dimension), (s#dimension,)))
+        @((F#A#R#T, F#A#R#T, I64), (r, r, r), (s, s, s))
+        (torch_arg_index_fold F, 9223372036854775807I64)
+        (tensor.proj_map @(ro + 1, ro)
+            ‹i: ro; core.bitcast Nat i›)
+        (tensor.proj_map @(ro + 1, r)
+            (torch_reduce_subscripts @r dimension),
+         tensor.proj_map @(ro + 1, r)
+            (torch_reduce_subscripts @r dimension),
+         tensor.proj_map @(ro + 1, r)
+            (torch_reduce_subscripts @r dimension))
+        (input, extrema, indices);
+    (ff, values, result_indices);
+
+/// Fold a statically shaped tensor directly to a scalar. The generated vector
+/// of reads and `vec.fold.l` disappear under PE, so a logical rank-zero result
+/// never reaches tensor bufferization as an empty-shape allocation.
+pub lam torch_sum_all_scalar (A: Arithmetic)
+                           {r: Nat, s: «r; Nat»}
+                           (input: «s; A#R#T»): A#R#T =
+    let n = torch_numel s;
+    let flat = tensor.reshape @(A#R#T, r, 1) s (n,) input;
+    let values = ‹i: n; flat#(i,)›;
+    vec.fold.l A#R#add (A#R#_0, values);
+
+/// Full reductions use two identical output cells so bufferization never has
+/// to allocate a rank-zero tensor. The implementation performs a block-level
+/// reduction followed by a reduction over the partials.
+pub lam torch_reduce_all_runtime {T: *}
+                             (combine: [T, T] → T, init: T)
+                             {r: Nat, s: «r; Nat»}
+                             (input: «s; T»): T =
+    let block = 65536;
+    let n = torch_numel s;
+    let blocks = (n + (block - 1)) / block;
+    let padded_n = blocks * block;
+    let padding = padded_n - n;
+    let padded_extent = n + padding;
+    let flat = tensor.reshape @(T, r, 1) s (n,) input;
+    let padded = tensor.pad (n,) (0, (0,), (padding,)) (flat, init);
+    let matrix = tensor.reshape @(T, 1, 2)
+        (padded_extent,) (blocks, block) padded;
+    let partial = tensor.map_reduce @1 @(T, 2, 3)
+        ((2, blocks), (2, blocks, block))
+        @(T, 2, (blocks, block)) (tensor.pool_fun combine, init)
+        (tensor.proj_map @(3, 2) (0, 1))
+        (tensor.proj_map @(3, 2) (1, 2),)
+        matrix;
+    let reduced = tensor.map_reduce @1 @(T, 1, 2)
+        ((2,), (2, blocks))
+        @(T, 2, (2, blocks)) (tensor.pool_fun combine, init)
+        (tensor.proj_map @(2, 1) (0,))
+        (tensor.proj_map @(2, 2) (0, 1),)
+        partial;
+    reduced#(0_2,);
+
+pub lam torch_sum_all_runtime (A: Arithmetic)
+                           {r: Nat, s: «r; Nat»}
+                           (input: «s; A#R#T»): A#R#T =
+    torch_reduce_all_runtime (A#R#add, A#R#_0) @(r, s) input;
+
+/// Rank-1 PairwiseDistance with a scalar result, avoiding a literal singleton
+/// tensor at the native execution boundary.
+pub lam torch_pairwise_distance_1d (F: Floating)
+    {d: Nat} (eps p: F#A#R#T)
+    (lhs rhs: «d; F#A#R#T»): F#A#R#T =
+    let powers = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        (torch_pairwise_power_scalar F (eps, p))
+        @(1, (d,)) (lhs, rhs);
+    let sum = torch_sum_all_runtime F#A @(1, (d,)) powers;
+    let powered = F#pow (sum, F#A#div (F#from_nat 1, p));
+    core.select @F#A#R#T (F#A#is_zero p, sum, powered);
+
+/// Two-level sum over every axis. A fixed block bounds the linear floating
+/// point accumulation chain while shape arithmetic and zero padding fold for
+/// every statically specialized input.
+pub lam torch_blocked_sum_all (A: Arithmetic)
+                          {r: Nat, s: «r; Nat»}
+                          (input: «s; A#R#T»): «(); A#R#T» =
+    let block = 256;
+    let n = torch_numel s;
+    let blocks = (n + (block - 1)) / block;
+    let padded_n = blocks * block;
+    let padding = padded_n - n;
+    let padded_extent = n + padding;
+    let flat = tensor.reshape @(A#R#T, r, 1) s (n,) input;
+    let padded = tensor.pad (n,) (0, (0,), (padding,)) (flat, A#R#_0);
+    let matrix = tensor.reshape @(A#R#T, 1, 2)
+        (padded_extent,) (blocks, block) padded;
+    let partial = torch_reduce_dim
+        (A#R#add, A#R#_0) ((blocks, block), 1_2) matrix;
+    torch_reduce_dim (A#R#add, A#R#_0) ((blocks,), 0_1) partial;
+
+/// PyTorch Smooth L1 loss with broadcasting and all reduction modes.
+/// Reduction tags are `0=none`, `1=mean`, and `2=sum`.
+/// PyTorch source: `torch/_decomp/decompositions.py::smooth_l1_loss`.
+/// PyTorch API: https://pytorch.org/docs/stable/generated/torch.nn.functional.smooth_l1_loss.html
+pub lam torch_smooth_l1_pointwise (F: Floating)
+    {ri rt ro: Nat}
+    (si: «ri; Nat», di: «ri; Idx ro»,
+     st: «rt; Nat», dt: «rt; Idx ro», so: «ro; Nat»)
+    (input: «si; F#A#R#T», target: «st; F#A#R#T»)
+    (beta: F#A#R#T)(): «so; F#A#R#T» =
+    let input_b = tensor.broadcast_in_dim @(F#A#R#T, ri, ro)
+        (si, so, input, di);
+    let target_b = tensor.broadcast_in_dim @(F#A#R#T, rt, ro)
+        (st, so, target, dt);
+    tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        (torch_smooth_l1_scalar F beta) @(ro, so) (input_b, target_b);
+
+/// PyTorch KL divergence with `none`, `mean`, `sum`, and functional
+/// `batchmean` represented by tags 0 through 3 respectively.
+/// PyTorch API: https://pytorch.org/docs/stable/generated/torch.nn.functional.kl_div.html
+pub lam torch_kl_div_pointwise (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (input target: «s; F#A#R#T»)
+    (log_target: Bool)(): «s; F#A#R#T» =
+    tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        (torch_kl_div_scalar F log_target) @(r, s) (input, target);
+
+/// PyTorch TripletMarginLoss for any non-scalar input. The final dimension is
+/// flattened as the pairwise-distance feature dimension; PE removes the
+/// reshape for each static rank. Reduction tags are `0=none`, `1=mean`, and
+/// `2=sum`.
+/// PyTorch API: https://pytorch.org/docs/stable/generated/torch.nn.functional.triplet_margin_loss.html
+pub lam torch_triplet_margin_pointwise (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (anchor positive negative: «s; F#A#R#T»)
+    (margin p eps: F#A#R#T, swap: Bool)()
+  : let feature_dim = core.idx 0 r  (r - 1);
+    «torch_numel (torch_reduce_shape (s, feature_dim)); F#A#R#T» =
+    let feature_dim = core.idx 0 r  (r - 1);
+    let loss_shape = torch_reduce_shape (s, feature_dim);
+    let n = torch_numel loss_shape;
+    let d = s#feature_dim;
+    let matrix_shape = (n, d);
+    let anchor_2d = tensor.reshape @(F#A#R#T, r, 2)
+        s matrix_shape anchor;
+    let positive_2d = tensor.reshape @(F#A#R#T, r, 2)
+        s matrix_shape positive;
+    let negative_2d = tensor.reshape @(F#A#R#T, r, 2)
+        s matrix_shape negative;
+    let distance_positive = torch_pairwise_distance_2d F
+        @(n, d) (eps, p) (anchor_2d, positive_2d);
+    let distance_negative = torch_pairwise_distance_2d F
+        @(n, d) (eps, p) (anchor_2d, negative_2d);
+    let distance_swap = torch_pairwise_distance_2d F
+        @(n, d) (eps, p) (positive_2d, negative_2d);
+    let swapped_negative = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#minimum @(1, (n,)) (distance_negative, distance_swap);
+    let effective_negative = core.select @«n; F#A#R#T»
+        (swap, swapped_negative, distance_negative);
+    tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        (torch_triplet_margin_scalar F margin)
+        @(1, (n,)) (distance_positive, effective_negative);
+
+pub lam torch_nat_max (a b: Nat): Nat =
+    core.select (a >= b, a, b);
+
+pub lam torch_nat_min (a b: Nat): Nat =
+    core.select (a <= b, a, b);
+
+pub lam torch_matmul_batch_rank (rl rr: Nat): Nat =
+    torch_nat_max (rl - 2, rr - 2);
+
+pub lam torch_matmul_output_rank (rl rr: Nat): Nat =
+    let rb = torch_matmul_batch_rank (rl, rr);
+    let lhs_tail = core.select (rl == 1, 0, 1);
+    let rhs_tail = core.select (rr == 1, 0, 1);
+    rb + (lhs_tail + rhs_tail);
+
+/// Python: `1 if rank == 1 else shape[-2]`.
+pub lam torch_matmul_rows {r: Nat} (s: «r; Nat»): Nat =
+    (core.select (r <= 1, vector, matrix)) ()
+    where
+        lam vector(): Nat = 1;
+        lam matrix(): Nat = s#(core.idx 0 r  (r - 2));
+    end;
+
+/// Python: `shape[-1]`, with a harmless sentinel for the rejected rank-0 case.
+pub lam torch_matmul_last {r: Nat} (s: «r; Nat»): Nat =
+    (core.select (r == 0, scalar, extent)) ()
+    where
+        lam scalar(): Nat = 1;
+        lam extent(): Nat = s#(core.idx 0 r  (r - 1));
+    end;
+
+/// Python: `shape[-2] if rank > 1 else shape[-1]`.
+pub lam torch_matmul_rhs_contract {r: Nat} (s: «r; Nat»): Nat =
+    (core.select (r <= 1, vector, matrix)) ()
+    where
+        lam vector(): Nat = torch_matmul_last s;
+        lam matrix(): Nat = s#(core.idx 0 r  (r - 2));
+    end;
+
+/// Python: `1 if rank == 1 else shape[-1]`.
+pub lam torch_matmul_cols {r: Nat} (s: «r; Nat»): Nat =
+    core.select (r == 1, 1, torch_matmul_last s);
+
+/// Returns the trailing-aligned batch extent, or one for a missing axis.
+pub lam torch_matmul_batch_extent {r rb: Nat}
+                               (s: «r; Nat», i: Idx rb): Nat =
+    let br = r - 2;
+    let offset = rb - br;
+    let i_nat = core.bitcast Nat i;
+    core.select (
+        i_nat < offset,
+        1,
+        s#(core.idx 0 r  (i_nat - offset)));
+
+pub lam torch_matmul_batch_compatible {rl rr: Nat}
+                                   (sl: «rl; Nat», sr: «rr; Nat»): Bool =
+    let rb = torch_matmul_batch_rank (rl, rr);
+    let checks = ‹i: rb;
+        let lhs = torch_matmul_batch_extent @(rl, rb) (sl, i);
+        let rhs = torch_matmul_batch_extent @(rr, rb) (sr, i);
+        let compatible = core.bit2.or_ 0 (
+            lhs == rhs,
+            core.bit2.or_ 0 (
+                lhs == 1,
+                rhs == 1));
+        core.select @Nat (compatible, 1, 0)›;
+    vec.fold.l core.nat.mul (1, checks) == 1;
+
+pub lam torch_matmul_batch_shape {rl rr: Nat}
+                              (sl: «rl; Nat», sr: «rr; Nat»)
+                            : «torch_matmul_batch_rank (rl, rr); Nat» =
+    let rb = torch_matmul_batch_rank (rl, rr);
+    ‹i: rb; torch_nat_max (
+        torch_matmul_batch_extent @(rl, rb) (sl, i),
+        torch_matmul_batch_extent @(rr, rb) (sr, i))›;
+
+pub lam torch_matmul_output_shape {rl rr: Nat}
+                               (sl: «rl; Nat», sr: «rr; Nat»)
+                             : «torch_matmul_output_rank (rl, rr); Nat» =
+    let rb = torch_matmul_batch_rank (rl, rr);
+    let ro = torch_matmul_output_rank (rl, rr);
+    let batch = torch_matmul_batch_shape (sl, sr);
+    let m = torch_matmul_rows sl;
+    let n = torch_matmul_cols sr;
+    ‹i: ro;
+        let i_nat = core.bitcast Nat i;
+        (core.select (i_nat < rb, batch_extent, matrix_extent)) ()
+        where
+            lam batch_extent(): Nat = batch#(core.idx 0 rb  i_nat);
+            lam matrix_extent(): Nat =
+                core.select (
+                    core.bit2.and_ 0 (
+                        rl != 1,
+                        i_nat == rb),
+                    m,
+                    n);
+        end›;
+
+pub lam torch_matmul_lhs_dims {rl rb: Nat}(): «rl; Idx (rb + 2)» =
+    ‹i: rl;
+        let i_nat = core.bitcast Nat i;
+        let br = rl - 2;
+        let mapped = (core.select (rl == 1, vector, extent)) ()
+        where
+            lam vector(): Nat = rb + 1;
+            lam extent(): Nat =
+                core.select (
+                    i_nat < br,
+                    rb - br + i_nat,
+                    rb + (i_nat - br));
+        end;
+        core.idx 0 (rb + 2)  mapped›;
+
+pub lam torch_matmul_rhs_dims {rr rb: Nat}(): «rr; Idx (rb + 2)» =
+    ‹i: rr;
+        let i_nat = core.bitcast Nat i;
+        let br = rr - 2;
+        let mapped = (core.select (rr == 1, vector, extent)) ()
+        where
+            lam vector(): Nat = rb;
+            lam extent(): Nat =
+                core.select (
+                    i_nat < br,
+                    rb - br + i_nat,
+                    rb + (i_nat - br));
+        end;
+        core.idx 0 (rb + 2)  mapped›;
+
+/// Internal matrix-only kernel after vector promotion and batch broadcasting.
+pub lam torch_matmul_matrices (A: Arithmetic) {rb m k n: Nat}
+                          (batch_shape: «rb; Nat»)
+                          (lhs: «vec.cat (batch_shape, (m, k)); A#R#T»,
+                           rhs: «vec.cat (batch_shape, (k, n)); A#R#T»)
+                        : «vec.cat (batch_shape, (m, n)); A#R#T» =
+    let batch = torch_numel batch_shape;
+    let lhs_shape = vec.cat (batch_shape, (m, k));
+    let rhs_shape = vec.cat (batch_shape, (k, n));
+    let out_shape = vec.cat (batch_shape, (m, n));
+    let lhs_3d = tensor.reshape
+        @(A#R#T, rb + 2, 3)
+        lhs_shape (batch, m, k) lhs;
+    let rhs_3d = tensor.reshape
+        @(A#R#T, rb + 2, 3)
+        rhs_shape (batch, k, n) rhs;
+    let product = tensor.bmm A#R @(batch, m, k, n) (lhs_3d, rhs_3d);
+    tensor.reshape
+        @(A#R#T, 3, rb + 2)
+        (batch, m, n) out_shape product;
+
+/// NCHW `aten.convolution` specialization decomposed through grouped
+/// cross-correlation. Transposed convolution and nonzero output padding remain
+/// explicit preconditions instead of silently changing the semantics.
+pub lam torch_grouped_conv2d_in_map
+    (cin_per_group cout_per_group: Nat,
+     stride dilation: «2; Nat»)
+    (o: «7; affine.Index»): «4; affine.Index» =
+    let group = affine.semiop.floordiv (o#1_7, cout_per_group);
+    let channel = affine.op.add
+        (affine.semiop.mul (group, cin_per_group), o#4_7);
+    (o#0_7, channel,
+     affine.op.add
+        (affine.semiop.mul (o#2_7, stride#0_2),
+         affine.semiop.mul (o#5_7, dilation#0_2)),
+     affine.op.add
+        (affine.semiop.mul (o#3_7, stride#1_2),
+         affine.semiop.mul (o#6_7, dilation#1_2)));
+
+pub lam torch_grouped_conv2d
+    (A: Arithmetic)
+    {n cin cout cin_per_group h w kh kw: Nat}
+    (groups: Nat, stride dilation padding: «2; Nat»)
+    (input: «n, cin, h, w; A#R#T»,
+     weight: «cout, cin_per_group, kh, kw; A#R#T»)
+  : «tensor.conv_shape
+        (n, cout, (h, w), (kh, kw), stride, dilation, padding); A#R#T» =
+    let input_shape = (n, cin, h, w);
+    let pad_lohi = (0, 0, padding#0_2, padding#1_2);
+    let padded = tensor.pad input_shape
+        (0, pad_lohi, pad_lohi) (input, A#R#_0);
+    let padded_shape = tensor.shape 4 padded;
+    let output_shape = tensor.conv_shape
+        (n, cout, (h, w), (kh, kw), stride, dilation, padding);
+    let cout_per_group = cout / groups;
+    // An ungrouped convolution is `tensor.conv`, whose implementation schedules it.
+    lam ungrouped(): «tensor.conv_shape (n, cout, (h, w), (kh, kw), stride, dilation, padding); A#R#T» =
+        tensor.conv A#R @(n, cin, cout, h, w, kh, kw) (stride, dilation, padding)
+            (input, core.bitcast «cout, cin, kh, kw; A#R#T» weight);
+    lam grouped(): «tensor.conv_shape (n, cout, (h, w), (kh, kw), stride, dilation, padding); A#R#T» =
+        tensor.map_reduce
+            (output_shape,
+             (n, cout, output_shape#2_4, output_shape#3_4,
+              cin_per_group, kh, kw))
+            (torch_conv_fun A#R, A#R#_0)
+            (tensor.proj_map (0, 1, 2, 3))
+            (torch_grouped_conv2d_in_map
+                (cin_per_group, cout_per_group, stride, dilation),
+             tensor.proj_map (1, 4, 5, 6))
+            (padded, weight);
+    (grouped, ungrouped)#(groups == 1) ();
+
+/// Output shape for the rank-3 NCL specialization of PyTorch convolution.
+/// The length formula is the one-dimensional instance of `tensor.conv_shape`.
+pub lam torch_conv1d_shape
+    (n cout length kernel stride dilation padding: Nat): «3; Nat» =
+    let expanded = tensor.conv_shape
+        (n, cout, (length, 1), (kernel, 1),
+         (stride, 1), (dilation, 1), (padding, 0));
+    (n, cout, expanded#2₄);
+
+/// Convert a padded NCHW coordinate back to PyTorch's flattened HxW index.
+/// Padding receives the largest I64 so it loses first-index tie breaking even
+/// when a real input element is negative infinity.
+pub lam torch_pool2d_flat_index {h w: Nat} (padding: «2; Nat»)
+                            (indices: «4; I64»): I64 =
+    let row = core.wrap.sub 0 (
+        indices#2_4, core.bitcast I64 padding#ff);
+    let col = core.wrap.sub 0 (
+        indices#3_4, core.bitcast I64 padding#tt);
+    let valid_row = core.bit2.and_ 0 (
+        core.icmp.sge (row, 0I64),
+        core.icmp.sl (row, core.bitcast I64 h));
+    let valid_col = core.bit2.and_ 0 (
+        core.icmp.sge (col, 0I64),
+        core.icmp.sl (col, core.bitcast I64 w));
+    let flat = core.wrap.add 0 (
+        core.wrap.mul 0 (row, core.bitcast I64 w), col);
+    core.select @I64 (
+        core.bit2.and_ 0 (valid_row, valid_col),
+        flat, 9223372036854775807I64);
+
+pub lam torch_pool3d_in_map
+    (stride dilation: «3; Nat»)
+    (o: «8; affine.Index»): «5; affine.Index» =
+    (o#0_8, o#1_8,
+     affine.op.add
+        (affine.semiop.mul (o#2_8, stride#0_3),
+         affine.semiop.mul (o#5_8, dilation#0_3)),
+     affine.op.add
+        (affine.semiop.mul (o#3_8, stride#1_3),
+         affine.semiop.mul (o#6_8, dilation#1_3)),
+     affine.op.add
+        (affine.semiop.mul (o#4_8, stride#2_3),
+         affine.semiop.mul (o#7_8, dilation#2_3)));
+
+pub lam torch_pool3d
+    {T: *}
+    (g: [T, T] → T, init: T)
+    {n c d h w: Nat}
+    (kernel stride dilation padding s_out: «3; Nat»)
+    (input: «n, c, d, h, w; T»)
+  : «n, c, s_out#0_3, s_out#1_3, s_out#2_3; T» =
+    let input_shape = (n, c, d, h, w);
+    let pad_lohi = (0, 0, padding#0_3, padding#1_3, padding#2_3);
+    let padded = tensor.pad input_shape
+        (0, pad_lohi, pad_lohi) (input, init);
+    let padded_shape = tensor.shape 5 padded;
+    tensor.map_reduce
+        ((n, c, s_out#0_3, s_out#1_3, s_out#2_3),
+         (n, c, s_out#0_3, s_out#1_3, s_out#2_3,
+          kernel#0_3, kernel#1_3, kernel#2_3))
+        (tensor.pool_fun g, init)
+        (tensor.proj_map (0, 1, 2, 3, 4))
+        (torch_pool3d_in_map (stride, dilation),)
+        padded;
+
+/// Output shape for rank-3 NCL pooling. The singleton width embeds 1-D
+/// pooling into the canonical 2-D implementation and is removed by PE.
+pub lam torch_pool1d_shape
+    (n c length kernel stride dilation padding: Nat, ceil_mode: Bool): «3; Nat» =
+    let expanded = torch_pool_shape
+        (length, 1, (kernel, 1), (stride, 1), (dilation, 1),
+         (padding, 0), ceil_mode);
+    (n, c, expanded#ff);
+
+/// Python equivalent for one spatial axis:
+/// `start = out * stride; end = start + kernel`
+/// `with_pad = min(end, input + 2*pad) - start`
+/// `valid = min(end, pad + input) - max(start, pad)`.
+pub lam torch_avg_pool_axis_count
+    (input kernel stride padding out: Nat, count_include_pad: Bool): Nat =
+    let start = out * stride;
+    let window_end = start + kernel;
+    let padded_end = input + 2 * padding;
+    let with_pad = torch_nat_min (window_end, padded_end) - start;
+    let valid_begin = torch_nat_max (start, padding);
+    let valid_end = torch_nat_min
+        (window_end, padding + input);
+    let valid = valid_end - valid_begin;
+    core.select (count_include_pad, with_pad, valid);
+
+pub lam torch_avg_pool_divisor (F: Floating)
+    (h w: Nat, kernel stride padding: «2; Nat», count_include_pad: Bool,
+     divisor_override: option.Opt Nat)
+    (indices: «4; I64»): F#A#R#T =
+    let oh = core.bitcast Nat indices#2_4;
+    let ow = core.bitcast Nat indices#3_4;
+    let dh = torch_avg_pool_axis_count
+        (h, kernel#ff, stride#ff, padding#ff, oh, count_include_pad);
+    let dw = torch_avg_pool_axis_count
+        (w, kernel#tt, stride#tt, padding#tt, ow, count_include_pad);
+    let divisor = option.unwrap_or
+        divisor_override (dh * dw);
+    F#from_nat divisor;
+
+pub lam torch_avg_pool3d_divisor (F: Floating)
+    (d h w: Nat, kernel stride padding: «3; Nat»,
+     count_include_pad: Bool, divisor_override: option.Opt Nat)
+    (indices: «5; I64»): F#A#R#T =
+    let od = core.bitcast Nat indices#2_5;
+    let oh = core.bitcast Nat indices#3_5;
+    let ow = core.bitcast Nat indices#4_5;
+    let dd = torch_avg_pool_axis_count
+        (d, kernel#0_3, stride#0_3, padding#0_3, od, count_include_pad);
+    let dh = torch_avg_pool_axis_count
+        (h, kernel#1_3, stride#1_3, padding#1_3, oh, count_include_pad);
+    let dw = torch_avg_pool_axis_count
+        (w, kernel#2_3, stride#2_3, padding#2_3, ow, count_include_pad);
+    let divisor = option.unwrap_or
+        divisor_override (dd * (dh * dw));
+    F#from_nat divisor;
+
+/// PyTorch adaptive pooling window boundaries.
+pub lam torch_adaptive_pool_start (output_index output_size input_size: Nat): Nat =
+    output_index * input_size / output_size;
+
+pub lam torch_adaptive_pool_end (output_index output_size input_size: Nat): Nat =
+    ((output_index + 1) * input_size + (output_size - 1)) / output_size;
+
+pub lam torch_adaptive_pool_max_window (input_size output_size: Nat): Nat =
+    let rounded_up = (input_size + (output_size - 1)) / output_size;
+    // Non-divisible partitions can overlap by one element. Divisible ones
+    // have exact-width windows and should not create a dead extra candidate.
+    rounded_up + core.select (
+            input_size % output_size == 0,
+            0, 1);
+
+/// Replaces the final `k` spatial extents with an adaptive output size. This
+/// is the shared dependent shape rule behind the three public schemas.
+pub lam torch_adaptive_pool_shape {r k: Nat}
+    (s: «r; Nat», output_size: «k; Nat»): «r; Nat» =
+    let spatial_start = r - k;
+    ‹i: r;
+        let i_nat = core.bitcast Nat i;
+        let spatial = i_nat >= spatial_start;
+        let output_axis = core.idx 0 k  (i_nat - spatial_start);
+        core.select (spatial, output_size#output_axis, s#i)›;
+
+/// ATen requires every non-batch input extent and every currently
+/// representable output extent to be positive.
+pub lam torch_adaptive_pool_extents_valid {r k: Nat}
+    (s: «r; Nat», output_size: «k; Nat»): Bool =
+    let spatial_start = r - k;
+    vec.fold.l (core.bit2.and_ 0) (
+        tt,
+        ‹i: k;
+            core.bit2.and_ 0 (
+                s#(core.idx 0 r 
+                    (spatial_start + core.bitcast Nat i)) > 0,
+                output_size#i > 0)›);
+
+pub lam torch_adaptive_pool1d_shape {r: Nat}
+    (s: «r; Nat», output_size: Nat): «r; Nat» =
+    torch_adaptive_pool_shape @(r, 1) (s, (output_size,));
+
+pub lam torch_adaptive_pool1d_element (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (output_size: Nat, input: «s; F#A#R#T»)
+    (indices: «r; I64»): F#A#R#T =
+    let axis = core.idx 0 r  (r - 1);
+    let input_size = s#axis;
+    let output_index = core.bitcast Nat (indices#axis);
+    let start = torch_adaptive_pool_start
+        (output_index, output_size, input_size);
+    let stop = torch_adaptive_pool_end
+        (output_index, output_size, input_size);
+    let width = stop - start;
+    let max_window = torch_adaptive_pool_max_window
+        (input_size, output_size);
+    let values = ‹k: max_window;
+        let candidate = start + core.bitcast Nat k;
+        let inside = candidate < stop;
+        let safe = core.select (inside, candidate, start);
+        let coords = ‹i: r;
+            let raw = core.select @I64 (
+                core.icmp.e @r (i, axis),
+                core.bitcast I64 safe,
+                indices#i);
+            core.conv.u (s#i) raw›;
+        let value = input#coords;
+        core.select @F#A#R#T (inside, value, F#A#R#_0)›;
+    F#A#div (vec.fold.l F#A#R#add (F#A#R#_0, values), F#from_nat width);
+
+pub lam torch_adaptive_pool2d_shape {r: Nat}
+    (s: «r; Nat», output_size: «2; Nat»): «r; Nat» =
+    torch_adaptive_pool_shape @(r, 2) (s, output_size);
+
+pub lam torch_adaptive_pool2d_window_element (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (output_size: «2; Nat», input: «s; F#A#R#T»)
+    (indices: «r + 2; I64»): F#A#R#T =
+    let total_rank = r + 2;
+    let h_axis = core.idx 0 r  (r - 2);
+    let w_axis = core.idx 0 r  (r - 1);
+    let oh = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r - 2)));
+    let ow = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r - 1)));
+    let sh = torch_adaptive_pool_start (oh, output_size#0_2, s#h_axis);
+    let sw = torch_adaptive_pool_start (ow, output_size#1_2, s#w_axis);
+    let eh = torch_adaptive_pool_end (oh, output_size#0_2, s#h_axis);
+    let ew = torch_adaptive_pool_end (ow, output_size#1_2, s#w_axis);
+    let kh = core.bitcast Nat (indices#(core.idx 0 total_rank  r));
+    let kw = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r + 1)));
+    let ch = sh + kh;
+    let cw = sw + kw;
+    let inside = core.bit2.and_ 0 (
+        ch < eh, cw < ew);
+    let safe_h = core.select (inside, ch, sh);
+    let safe_w = core.select (inside, cw, sw);
+    let coords = ‹i: r;
+        let output_i = core.idx 0 total_rank  (core.bitcast Nat i);
+        let raw = core.select @I64 (
+            core.icmp.e @r (i, h_axis), core.bitcast I64 safe_h,
+            core.select @I64 (
+                core.icmp.e @r (i, w_axis), core.bitcast I64 safe_w,
+                indices#output_i));
+        core.conv.u (s#i) raw›;
+    core.select @F#A#R#T
+        (inside, input#coords, F#A#R#_0);
+
+pub lam torch_adaptive_pool2d_divisor_element (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (output_size: «2; Nat»)
+    (indices: «r; I64»): F#A#R#T =
+    let h_axis = core.idx 0 r  (r - 2);
+    let w_axis = core.idx 0 r  (r - 1);
+    let oh = core.bitcast Nat (indices#h_axis);
+    let ow = core.bitcast Nat (indices#w_axis);
+    let sh = torch_adaptive_pool_start (oh, output_size#0_2, s#h_axis);
+    let sw = torch_adaptive_pool_start (ow, output_size#1_2, s#w_axis);
+    let eh = torch_adaptive_pool_end (oh, output_size#0_2, s#h_axis);
+    let ew = torch_adaptive_pool_end (ow, output_size#1_2, s#w_axis);
+    F#from_nat ((eh - sh) * (ew - sw));
+
+pub lam torch_adaptive_pool3d_shape {r: Nat}
+    (s: «r; Nat», output_size: «3; Nat»): «r; Nat» =
+    torch_adaptive_pool_shape @(r, 3) (s, output_size);
+
+/// Materializes one masked member of the rectangular superset of every
+/// adaptive window. The following `tensor.map_reduce` performs the sum, which
+/// keeps large 3D windows out of scalar `vec.fold` expansion.
+pub lam torch_adaptive_pool3d_window_element (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (output_size: «3; Nat», input: «s; F#A#R#T»)
+    (indices: «r + 3; I64»): F#A#R#T =
+    let total_rank = r + 3;
+    let d_axis = core.idx 0 r  (r - 3);
+    let h_axis = core.idx 0 r  (r - 2);
+    let w_axis = core.idx 0 r  (r - 1);
+    let od = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r - 3)));
+    let oh = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r - 2)));
+    let ow = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r - 1)));
+    let sd = torch_adaptive_pool_start (od, output_size#0_3, s#d_axis);
+    let sh = torch_adaptive_pool_start (oh, output_size#1_3, s#h_axis);
+    let sw = torch_adaptive_pool_start (ow, output_size#2_3, s#w_axis);
+    let ed = torch_adaptive_pool_end (od, output_size#0_3, s#d_axis);
+    let eh = torch_adaptive_pool_end (oh, output_size#1_3, s#h_axis);
+    let ew = torch_adaptive_pool_end (ow, output_size#2_3, s#w_axis);
+    let kd = core.bitcast Nat (indices#(core.idx 0 total_rank  r));
+    let kh = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r + 1)));
+    let kw = core.bitcast Nat
+        (indices#(core.idx 0 total_rank  (r + 2)));
+    let cd = sd + kd;
+    let ch = sh + kh;
+    let cw = sw + kw;
+    let inside = core.bit2.and_ 0 (
+        cd < ed,
+        core.bit2.and_ 0 (ch < eh, cw < ew));
+    let safe_d = core.select (inside, cd, sd);
+    let safe_h = core.select (inside, ch, sh);
+    let safe_w = core.select (inside, cw, sw);
+    let coords = ‹i: r;
+        let output_i = core.idx 0 total_rank  (core.bitcast Nat i);
+        let raw = core.select @I64 (
+            core.icmp.e @r (i, d_axis), core.bitcast I64 safe_d,
+            core.select @I64 (
+                core.icmp.e @r (i, h_axis), core.bitcast I64 safe_h,
+                core.select @I64 (
+                    core.icmp.e @r (i, w_axis), core.bitcast I64 safe_w,
+                    indices#output_i)));
+        core.conv.u (s#i) raw›;
+    core.select @F#A#R#T
+        (inside, input#coords, F#A#R#_0);
+
+pub lam torch_adaptive_pool3d_divisor_element (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (output_size: «3; Nat»)
+    (indices: «r; I64»): F#A#R#T =
+    let d_axis = core.idx 0 r  (r - 3);
+    let h_axis = core.idx 0 r  (r - 2);
+    let w_axis = core.idx 0 r  (r - 1);
+    let od = core.bitcast Nat (indices#d_axis);
+    let oh = core.bitcast Nat (indices#h_axis);
+    let ow = core.bitcast Nat (indices#w_axis);
+    let sd = torch_adaptive_pool_start (od, output_size#0_3, s#d_axis);
+    let sh = torch_adaptive_pool_start (oh, output_size#1_3, s#h_axis);
+    let sw = torch_adaptive_pool_start (ow, output_size#2_3, s#w_axis);
+    let ed = torch_adaptive_pool_end (od, output_size#0_3, s#d_axis);
+    let eh = torch_adaptive_pool_end (oh, output_size#1_3, s#h_axis);
+    let ew = torch_adaptive_pool_end (ow, output_size#2_3, s#w_axis);
+    F#from_nat ((ed - sd) * ((eh - sh) * (ew - sw)));
+
+///
+/// PyTorch source: `aten/src/ATen/native/ScatterGatherChecks.h` and
+/// `torch/_meta_registrations.py::gather_shape_check`.
+/// The dependent tensor dialect type captures index bounds after checked cast,
+/// while its implementation checks every non-gather shape relation.
+pub lam torch_gather_shape_compatible {r: Nat}
+                                  (s_input s_index: «r; Nat»,
+                                   dimension: Idx r): Bool =
+    let checks = ‹d: r;
+        let compatible = core.bit2.or_ 0 (
+            core.icmp.e @r (d, dimension),
+            s_index#d <= s_input#d);
+        core.select @Nat (compatible, 1, 0)›;
+    vec.fold.l core.nat.mul (1, checks) == 1;
+
+pub lam torch_shape_le {r: Nat} (lhs rhs: «r; Nat»): Bool =
+    let checks = ‹d: r;
+        core.select @Nat (lhs#d <= rhs#d, 1, 0)›;
+    vec.fold.l core.nat.mul (1, checks) == 1;
+
+pub lam torch_linearize_2d_index {n: Nat} (indices: [I64, I64]): I64 =
+    core.wrap.add 0 (
+        core.wrap.mul 0 (indices#ff, core.bitcast I64 n),
+        indices#tt);
+
+/// Shape normalized by each `(batch, group)` pair: `[C / G, *spatial]`.
+pub lam torch_group_norm_suffix {r: Nat}
+                            (s: «r; Nat», groups: Nat)
+                          : «r - 1; Nat» =
+    ‹i: r - 1;
+        let i_nat = core.bitcast Nat i;
+        core.select (
+            i_nat == 0,
+            s#(torch_channel_dim @r) / groups,
+            s#(core.idx 0 r  (i_nat + 1)))›;
+
+/// Applies channel statistics and optional affine parameters.
+pub lam torch_batch_norm_apply (F: Floating)
+    {r: Nat, s: «r; Nat»}
+    (input: «s; F#A#R#T»,
+     weight bias: option.Opt «s#(torch_channel_dim @r); F#A#R#T»,
+     mean variance: «s#(torch_channel_dim @r); F#A#R#T»,
+     eps: F#A#R#T): «s; F#A#R#T» =
+    let channel_dim = torch_channel_dim @r;
+    let channels = s#channel_dim;
+    let variance_eps = tensor.unary @(F#A#R#T, F#A#R#T)
+        (torch_add_scalar F#A eps) @(1, (channels,)) variance;
+    let rstd = tensor.unary @(F#A#R#T, F#A#R#T)
+        (torch_rsqrt_scalar F) @(1, (channels,)) variance_eps;
+    let mean_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
+        ((channels,), s, mean, (channel_dim,));
+    let rstd_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
+        ((channels,), s, rstd, (channel_dim,));
+    let centered = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#sub @(r, s) (input, mean_b);
+    let normalized = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#R#mul @(r, s) (centered, rstd_b);
+    let effective_weight = option.unwrap_or
+        weight ‹channels; F#from_nat 1›;
+    let effective_bias = option.unwrap_or
+        bias ‹channels; F#A#R#_0›;
+    let weight_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
+        ((channels,), s, effective_weight, (channel_dim,));
+    let bias_b = tensor.broadcast_in_dim @(F#A#R#T, 1, r)
+        ((channels,), s, effective_bias, (channel_dim,));
+    let scaled = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#R#mul @(r, s) (normalized, weight_b);
+    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#R#add @(r, s) (scaled, bias_b);
+
+/// Stable PyTorch softmax/log-softmax decomposition:
+///
+///     shifted = x                         if numel(x) == 0
+///             = x - max(x, dim)           otherwise
+///     softmax     = exp(shifted) / sum(exp(shifted), dim)
+///     log_softmax = shifted - log(sum(exp(shifted), dim))
+///
+/// `dimension` keeps PyTorch's signed convention and is canonicalized only
+/// inside the checked continuation. The internal `log` flag is static for both
+/// public schemas, so PE removes the unselected final formula. This
+/// same-element-type variant requires `half_to_float = false`; a mixed-type
+/// dictionary can extend the result type without changing the decomposition.
+/// Python: stabilize with `x - max(x, dim)`, exponentiate, reduce, then divide or subtract log-sum.
+/// PyTorch source: `torch/_decomp/decompositions.py::_softmax` and
+/// `_log_softmax`. Both use max subtraction only for non-empty tensors, then
+/// share exponentiation and sum; the final division/log branch differs.
+pub lam torch_softmax_common (F: Floating)
+                         {r: Nat, s: «r; Nat»}
+                         (dimension: I64, half_to_float: Bool, log: Bool)
+                         (input: «s; F#A#R#T»): «s; F#A#R#T» =
+    let valid_rank = r >= 1;
+    let valid_dim = torch_dim_in_range @r dimension;
+    let same_type = core.icmp.e @2 (half_to_float, ff);
+    let valid = core.bit2.and_ 0 (valid_rank, core.bit2.and_ 0 (valid_dim, same_type));
+    runtime.require
+        (valid, "softmax expects rank > 0, an in-range dim, and half_to_float=false")
+        body
+    where
+        lam body(): «s; F#A#R#T» =
+            let dim = torch_canonical_dim @r dimension;
+            let has_zero_dim = torch_numel s == 0;
+            let shifted = (core.select (has_zero_dim, empty, stabilized)) ()
+            where
+                lam empty(): «s; F#A#R#T» = input;
+                lam stabilized(): «s; F#A#R#T» =
+                    let maximum = torch_reduce_dim (F#A#maximum, F#neg_inf) (s, dim) input;
+                    let maximum_b = torch_broadcast_reduced @(F#A#R#T, r) (s, dim) maximum;
+                    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
+                        F#A#sub @(r, s) (input, maximum_b);
+            end;
+            let unnormalized = tensor.unary @(F#A#R#T, F#A#R#T)
+                (torch_exp_scalar F) @(r, s) shifted;
+            let denominator = torch_reduce_dim
+                (F#A#R#add, F#A#R#_0) (s, dim) unnormalized;
+            let denominator_b = torch_broadcast_reduced @(F#A#R#T, r)
+                (s, dim) denominator;
+            (core.select (log, log_result, softmax_result)) ()
+            where
+                lam softmax_result(): «s; F#A#R#T» =
+                    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
+                        F#A#div @(r, s) (unnormalized, denominator_b);
+                lam log_result(): «s; F#A#R#T» =
+                    let log_denominator = tensor.unary @(F#A#R#T, F#A#R#T)
+                        (torch_log_scalar F) @(r, s) denominator_b;
+                    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
+                        F#A#sub @(r, s) (shifted, log_denominator);
+            end;
+    end;
+
+/// Class axis used by PyTorch CrossEntropyLoss: axis zero for unbatched logits
+/// and axis one otherwise.
+pub lam torch_cross_entropy_class_dim {r: Nat}: Idx r =
+    core.idx 0 r  (core.select (r == 1, 0, 1));
+
+pub lam torch_cross_entropy_safe_target (ignore_index: I64) (value: I64): I64 =
+    core.select @I64 (core.icmp.e (value, ignore_index), 0I64, value);
+
+pub lam torch_cross_entropy_mask_value (A: Arithmetic)
+    (ignore_index: I64)
+    (args: [I64, A#R#T]): A#R#T =
+    core.select @A#R#T
+        (core.icmp.e (args#ff, ignore_index), A#R#_0, args#tt);
+
+pub lam torch_cross_entropy_smooth_target (F: Floating)
+    (one_minus smoothing_per_class: F#A#R#T)
+    (target: F#A#R#T): F#A#R#T =
+    F#A#R#add (F#A#R#mul (target, one_minus), smoothing_per_class);
+
+/// Python: `col >= row + diagonal` for upper, or `col <= row + diagonal` for lower.
+pub lam triangular_keep {r: Nat} (upper: Bool, diagonal: I64)
+                    (indices: «r; I64»): Bool =
+    let row_axis = core.idx 0 r  (r - 2);
+    let col_axis = core.idx 0 r  (r - 1);
+    let row = indices#row_axis;
+    let col = indices#col_axis;
+    let shifted_row = core.wrap.add 0 (row, diagonal);
+    let keep_upper = core.icmp.sge (col, shifted_row);
+    let keep_lower = core.icmp.sle (col, shifted_row);
+    core.select (upper, keep_upper, keep_lower);
+
+/// Python: `value if keep else zero`.
+pub lam triangular_select {T: *} (zero: T) (keep: Bool, value: T): T =
+    core.select @T (keep, value, zero);
+
+pub lam triangular_apply {T: *, r: Nat} (s: «r; Nat»)
+                     (upper: Bool, zero: T, diagonal: I64)
+                     (input: «s; T»): «s; T» =
+    let mask = tensor.generate @(Bool, r) s
+        (triangular_keep @r (upper, diagonal));
+    tensor.binary @(Bool, T, T) (triangular_select @T zero)
+        @(r, s) (mask, input);
+
+pub lam conv3d_shape
+    (n cout: Nat, s k stride dilation padding: «3; Nat»): «5; Nat» =
+    let dhw = ‹axis: 3;
+        (s#axis + 2 * padding#axis - (dilation#axis * (k#axis - 1) + 1)) / stride#axis + 1›;
+    (n, cout, dhw#0_3, dhw#1_3, dhw#2_3);
+
+pub lam torch_grouped_conv3d_in_map
+    (cin_per_group cout_per_group: Nat,
+     stride dilation: «3; Nat»)
+    (o: «9; affine.Index»): «5; affine.Index» =
+    let group = affine.semiop.floordiv (o#1_9, cout_per_group);
+    let channel = affine.op.add
+        (affine.semiop.mul (group, cin_per_group), o#5_9);
+    (o#0_9, channel,
+     affine.op.add
+        (affine.semiop.mul (o#2_9, stride#0_3),
+         affine.semiop.mul (o#6_9, dilation#0_3)),
+     affine.op.add
+        (affine.semiop.mul (o#3_9, stride#1_3),
+         affine.semiop.mul (o#7_9, dilation#1_3)),
+     affine.op.add
+        (affine.semiop.mul (o#4_9, stride#2_3),
+         affine.semiop.mul (o#8_9, dilation#2_3)));
+
+pub lam torch_grouped_conv3d
+    (A: Arithmetic)
+    {n cin cout cin_per_group d h w kd kh kw: Nat}
+    (groups: Nat, stride dilation padding: «3; Nat»)
+    (input: «n, cin, d, h, w; A#R#T»,
+     weight: «cout, cin_per_group, kd, kh, kw; A#R#T»)
+  : «conv3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         stride, dilation, padding); A#R#T» =
+    let input_shape = (n, cin, d, h, w);
+    let pad_lohi = (0, 0, padding#0_3, padding#1_3, padding#2_3);
+    let padded = tensor.pad input_shape
+        (0, pad_lohi, pad_lohi) (input, A#R#_0);
+    let padded_shape = tensor.shape 5 padded;
+    let output_shape = conv3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         stride, dilation, padding);
+    let cout_per_group = cout / groups;
+    tensor.map_reduce
+        (output_shape,
+         (n, cout, output_shape#2_5, output_shape#3_5,
+          output_shape#4_5, cin_per_group, kd, kh, kw))
+        (torch_conv_fun A#R, A#R#_0)
+        (tensor.proj_map (0, 1, 2, 3, 4))
+        (torch_grouped_conv3d_in_map
+            (cin_per_group, cout_per_group, stride, dilation),
+         tensor.proj_map (1, 5, 6, 7, 8))
+        (padded, weight);
+
+/// PyTorch transposed-convolution output extent:
+/// `(input - 1) * stride - 2 * padding + dilation * (kernel - 1)
+///  + output_padding + 1`.
+pub lam conv_transpose2d_shape
+    (n cout: Nat, s k stride dilation padding output_padding: «2; Nat»)
+  : «4; Nat» =
+    let hw = ‹axis: 2;
+        let expanded = (s#axis - 1) * stride#axis;
+        let kernel_span = dilation#axis * (k#axis - 1);
+        expanded + kernel_span - 2 * padding#axis + (output_padding#axis + 1)›;
+    (n, cout, hw#0_2, hw#1_2);
+
+pub lam torch_conv_transpose_upsampled_dim
+    (size stride output_padding: Nat): Nat =
+    (size - 1) * stride + 1 + output_padding;
+
+pub lam torch_conv_transpose2d_flip_weight_map
+    (kh kw: Nat) (o: «4; affine.Index»): «4; affine.Index» =
+    (o#0_4, o#1_4,
+     core.select (
+        kh == 1, o#2_4,
+        affine.op.sub
+            (affine.lit (kh - 1), o#2_4)),
+     core.select (
+        kw == 1, o#3_4,
+        affine.op.sub
+            (affine.lit (kw - 1), o#3_4)));
+
+pub fun torch_conv_weight_copy (A: Arithmetic)
+                           (acc: A#R#T, value: «1; A#R#T»)@tt
+                         : A#R#T =
+    return (value#0_1);
+
+pub lam torch_conv_transpose2d_weight
+    (A: Arithmetic)
+    {cin cout cout_per_group kh kw: Nat}
+    (groups: Nat)
+    (weight: «cin, cout_per_group, kh, kw; A#R#T»)
+  : «cout, cin / groups, kh, kw; A#R#T» =
+    let cin_per_group = cin / groups;
+    let grouped_weight = tensor.reshape @(A#R#T, 4, 5)
+        (cin, cout_per_group, kh, kw)
+        (groups, cin_per_group, cout_per_group, kh, kw) weight;
+    let swapped_weight = tensor.transpose @(A#R#T, 5)
+        (0_5, 2_5, 1_5, 3_5, 4_5) grouped_weight;
+    let oi_weight = tensor.reshape @(A#R#T, 5, 4)
+        (groups, cout_per_group, cin_per_group, kh, kw)
+        (cout, cin_per_group, kh, kw) swapped_weight;
+    tensor.map_reduce @1 @(A#R#T, 4, 4)
+        ((cout, cin_per_group, kh, kw),
+         (cout, cin_per_group, kh, kw))
+        @(A#R#T, 4, (cout, cin_per_group, kh, kw))
+        (torch_conv_weight_copy A, A#R#_0)
+        (affine.id @4)
+        (torch_conv_transpose2d_flip_weight_map (kh, kw),)
+        oi_weight;
+
+pub lam torch_grouped_conv_transpose2d_unit_stride
+    (A: Arithmetic)
+    {n cin cout cout_per_group h w kh kw: Nat}
+    (groups: Nat, stride dilation padding output_padding: «2; Nat»)
+    (input: «n, cin, h, w; A#R#T»,
+     weight: «cin, cout_per_group, kh, kw; A#R#T»)
+  : «conv_transpose2d_shape
+        (n, cout, (h, w), (kh, kw), stride, dilation,
+         padding, output_padding); A#R#T» =
+    let cin_per_group = cin / groups;
+    let flipped_weight = torch_conv_transpose2d_weight A
+        @(cin, cout, cout_per_group, kh, kw) groups weight;
+    let conv_padding = (
+        dilation#0_2 * (kh - 1) - padding#0_2,
+        dilation#1_2 * (kw - 1) - padding#1_2);
+    let result = torch_grouped_conv2d A
+        @(n, cin, cout, cin_per_group, h, w, kh, kw)
+        (groups, (1, 1), dilation, conv_padding)
+        (input, flipped_weight);
+    let result_shape = tensor.conv_shape
+        (n, cout, (h, w), (kh, kw),
+         (1, 1), dilation, conv_padding);
+    let output_shape = conv_transpose2d_shape
+        (n, cout, (h, w), (kh, kw),
+         stride, dilation, padding, output_padding);
+    tensor.reshape @(A#R#T, 4, 4)
+        result_shape output_shape result;
+
+/// Inserts zeros between NCHW spatial samples and appends output padding.
+/// Static unit strides collapse the reshape/pad/slice arithmetic under PE.
+pub lam torch_crop_prefix {T: *, r: Nat}
+                      (s_in s_out: «r; Nat»)
+                      (input: «s_in; T»): «s_out; T» =
+    tensor.map_reduce @1 @(T, r, r) (s_out, s_out)
+        @(T, r, s_in) (torch_tensor_copy, ⊥: T)
+        (affine.id @r) (affine.id @r,) input;
+
+pub lam torch_zero_insert2d
+    (A: Arithmetic)
+    {n c h w: Nat}
+    (stride output_padding: «2; Nat»)
+    (input: «n, c, h, w; A#R#T»)
+  : «n, c,
+      torch_conv_transpose_upsampled_dim
+          (h, stride#0_2, output_padding#0_2),
+      torch_conv_transpose_upsampled_dim
+          (w, stride#1_2, output_padding#1_2); A#R#T» =
+    let uh = torch_conv_transpose_upsampled_dim
+        (h, stride#0_2, output_padding#0_2);
+    let uw = torch_conv_transpose_upsampled_dim
+        (w, stride#1_2, output_padding#1_2);
+    let input_shape = (n, c, h, w);
+    let width_shape = (n, c, h, uw);
+    let output_shape = (n, c, uh, uw);
+
+    let width_expanded_shape = (n, c, h, w, 1);
+    let width_expanded = tensor.reshape @(A#R#T, 4, 5)
+        input_shape width_expanded_shape input;
+    let width_block_extent =
+        1 + (stride#1_2 - 1);
+    let width_block = tensor.pad width_expanded_shape
+        (0, (0, 0, 0, 0, 0),
+         (0, 0, 0, 0, stride#1_2 - 1))
+        (width_expanded, A#R#_0);
+    let width_dense_extent = w * width_block_extent;
+    let width_dense = tensor.reshape @(A#R#T, 5, 4)
+        (n, c, h, w, width_block_extent)
+        (n, c, h, width_dense_extent) width_block;
+    let width_extra = uw - width_dense_extent;
+    let width_available = tensor.pad
+        (n, c, h, width_dense_extent)
+        (0, (0, 0, 0, 0), (0, 0, 0, width_extra))
+        (width_dense, A#R#_0);
+    let width_upsampled = torch_crop_prefix @(A#R#T, 4)
+        ((n, c, h, width_dense_extent + width_extra),
+         width_shape)
+        width_available;
+
+    let height_expanded_shape = (n, c, h, 1, uw);
+    let height_expanded = tensor.reshape @(A#R#T, 4, 5)
+        width_shape height_expanded_shape width_upsampled;
+    let height_block_extent =
+        1 + (stride#0_2 - 1);
+    let height_block = tensor.pad height_expanded_shape
+        (0, (0, 0, 0, 0, 0),
+         (0, 0, 0, stride#0_2 - 1, 0))
+        (height_expanded, A#R#_0);
+    let height_dense_extent = h * height_block_extent;
+    let height_dense = tensor.reshape @(A#R#T, 5, 4)
+        (n, c, h, height_block_extent, uw)
+        (n, c, height_dense_extent, uw) height_block;
+    let height_extra = uh - height_dense_extent;
+    let height_available = tensor.pad
+        (n, c, height_dense_extent, uw)
+        (0, (0, 0, 0, 0), (0, 0, height_extra, 0))
+        (height_dense, A#R#_0);
+    torch_crop_prefix @(A#R#T, 4)
+        ((n, c, height_dense_extent + height_extra, uw),
+         output_shape)
+        height_available;
+
+pub lam torch_grouped_conv_transpose2d_strided
+    (A: Arithmetic)
+    {n cin cout cout_per_group h w kh kw: Nat}
+    (groups: Nat, stride dilation padding output_padding: «2; Nat»)
+    (input: «n, cin, h, w; A#R#T»,
+     weight: «cin, cout_per_group, kh, kw; A#R#T»)
+  : «conv_transpose2d_shape
+        (n, cout, (h, w), (kh, kw), stride, dilation,
+         padding, output_padding); A#R#T» =
+    let uh = torch_conv_transpose_upsampled_dim
+        (h, stride#0_2, output_padding#0_2);
+    let uw = torch_conv_transpose_upsampled_dim
+        (w, stride#1_2, output_padding#1_2);
+    let input_shape = (n, cin, h, w);
+    let width_shape = (n, cin, h, uw);
+    let upsampled_shape = (n, cin, uh, uw);
+
+    // Python pseudocode: insert `stride_w - 1` zeros after each input column,
+    // append output padding, then trim to the exact expanded width.
+    let width_expanded_shape = (n, cin, h, w, 1);
+    let width_expanded = tensor.reshape @(A#R#T, 4, 5)
+        input_shape width_expanded_shape input;
+    let width_block_extent =
+        1 + (stride#1_2 - 1);
+    let width_block = tensor.pad width_expanded_shape
+        (0, (0, 0, 0, 0, 0),
+         (0, 0, 0, 0, stride#1_2 - 1))
+        (width_expanded, A#R#_0);
+    let width_dense_extent = w * width_block_extent;
+    let width_dense = tensor.reshape @(A#R#T, 5, 4)
+        (n, cin, h, w, width_block_extent)
+        (n, cin, h, width_dense_extent) width_block;
+    let width_extra = uw - width_dense_extent;
+    let width_available = tensor.pad
+        (n, cin, h, width_dense_extent)
+        (0, (0, 0, 0, 0), (0, 0, 0, width_extra))
+        (width_dense, A#R#_0);
+    let width_upsampled = torch_crop_prefix @(A#R#T, 4)
+        ((n, cin, h, width_dense_extent + width_extra),
+         width_shape)
+        width_available;
+
+    // Apply the same zero insertion to height.
+    let height_expanded_shape = (n, cin, h, 1, uw);
+    let height_expanded = tensor.reshape @(A#R#T, 4, 5)
+        width_shape height_expanded_shape width_upsampled;
+    let height_block_extent =
+        1 + (stride#0_2 - 1);
+    let height_block = tensor.pad height_expanded_shape
+        (0, (0, 0, 0, 0, 0),
+         (0, 0, 0, stride#0_2 - 1, 0))
+        (height_expanded, A#R#_0);
+    let height_dense_extent = h * height_block_extent;
+    let height_dense = tensor.reshape @(A#R#T, 5, 4)
+        (n, cin, h, height_block_extent, uw)
+        (n, cin, height_dense_extent, uw) height_block;
+    let height_extra = uh - height_dense_extent;
+    let height_available = tensor.pad
+        (n, cin, height_dense_extent, uw)
+        (0, (0, 0, 0, 0), (0, 0, height_extra, 0))
+        (height_dense, A#R#_0);
+    let upsampled = torch_crop_prefix @(A#R#T, 4)
+        ((n, cin, height_dense_extent + height_extra, uw),
+         upsampled_shape)
+        height_available;
+
+    let unit_result = torch_grouped_conv_transpose2d_unit_stride A
+        @(n, cin, cout, cout_per_group, uh, uw, kh, kw)
+        (groups, (1, 1), dilation, padding, (0, 0))
+        (upsampled, weight);
+    let unit_shape = conv_transpose2d_shape
+        (n, cout, (uh, uw), (kh, kw),
+         (1, 1), dilation, padding, (0, 0));
+    let output_shape = conv_transpose2d_shape
+        (n, cout, (h, w), (kh, kw),
+         stride, dilation, padding, output_padding);
+    tensor.reshape @(A#R#T, 4, 4)
+        unit_shape output_shape unit_result;
+
+pub lam torch_grouped_conv_transpose2d
+    (A: Arithmetic)
+    {n cin cout cout_per_group h w kh kw: Nat}
+    (groups: Nat, stride dilation padding output_padding: «2; Nat»)
+    (input: «n, cin, h, w; A#R#T»,
+     weight: «cin, cout_per_group, kh, kw; A#R#T»)
+  : «conv_transpose2d_shape
+        (n, cout, (h, w), (kh, kw), stride, dilation,
+         padding, output_padding); A#R#T» =
+    let unit_stride = core.bit2.and_ 0 (
+        stride#0_2 == 1,
+        core.bit2.and_ 0 (
+            stride#1_2 == 1,
+            core.bit2.and_ 0 (
+                output_padding#0_2 == 0,
+                output_padding#1_2 == 0)));
+    core.select
+        (unit_stride,
+         torch_grouped_conv_transpose2d_unit_stride A
+            @(n, cin, cout, cout_per_group, h, w, kh, kw)
+            (groups, stride, dilation, padding, output_padding)
+            (input, weight),
+         torch_grouped_conv_transpose2d_strided A
+            @(n, cin, cout, cout_per_group, h, w, kh, kw)
+            (groups, stride, dilation, padding, output_padding)
+            (input, weight));
+
+pub lam torch_conv_transpose1d_shape
+    (n cout length kernel stride dilation padding output_padding: Nat): «3; Nat» =
+    let expanded = conv_transpose2d_shape
+        (n, cout, (length, 1), (kernel, 1),
+         (stride, 1), (dilation, 1), (padding, 0), (output_padding, 0));
+    (n, cout, expanded#2_4);
+
+pub lam conv_transpose3d_shape
+    (n cout: Nat, s k stride dilation padding output_padding: «3; Nat»)
+  : «5; Nat» =
+    let dhw = ‹axis: 3;
+        let expanded = (s#axis - 1) * stride#axis;
+        let kernel_span = dilation#axis * (k#axis - 1);
+        expanded + kernel_span - 2 * padding#axis + (output_padding#axis + 1)›;
+    (n, cout, dhw#0_3, dhw#1_3, dhw#2_3);
+
+pub lam torch_conv_transpose3d_flip_weight_map
+    (kd kh kw: Nat) (o: «5; affine.Index»): «5; affine.Index» =
+    (o#0_5, o#1_5,
+     core.select (
+        kd == 1, o#2_5,
+        affine.op.sub
+            (affine.lit (kd - 1), o#2_5)),
+     core.select (
+        kh == 1, o#3_5,
+        affine.op.sub
+            (affine.lit (kh - 1), o#3_5)),
+     core.select (
+        kw == 1, o#4_5,
+        affine.op.sub
+            (affine.lit (kw - 1), o#4_5)));
+
+pub lam torch_conv_transpose3d_weight
+    (A: Arithmetic)
+    {cin cout cout_per_group kd kh kw: Nat}
+    (groups: Nat)
+    (weight: «cin, cout_per_group, kd, kh, kw; A#R#T»)
+  : «cout, cin / groups, kd, kh, kw; A#R#T» =
+    let cin_per_group = cin / groups;
+    let grouped_weight = tensor.reshape @(A#R#T, 5, 6)
+        (cin, cout_per_group, kd, kh, kw)
+        (groups, cin_per_group, cout_per_group, kd, kh, kw) weight;
+    let swapped_weight = tensor.transpose @(A#R#T, 6)
+        (0_6, 2_6, 1_6, 3_6, 4_6, 5_6) grouped_weight;
+    let oi_weight = tensor.reshape @(A#R#T, 6, 5)
+        (groups, cout_per_group, cin_per_group, kd, kh, kw)
+        (cout, cin_per_group, kd, kh, kw) swapped_weight;
+    tensor.map_reduce @1 @(A#R#T, 5, 5)
+        ((cout, cin_per_group, kd, kh, kw),
+         (cout, cin_per_group, kd, kh, kw))
+        @(A#R#T, 5, (cout, cin_per_group, kd, kh, kw))
+        (torch_conv_weight_copy A, A#R#_0)
+        (affine.id @5)
+        (torch_conv_transpose3d_flip_weight_map (kd, kh, kw),)
+        oi_weight;
+
+pub lam torch_grouped_conv_transpose3d_unit_stride
+    (A: Arithmetic)
+    {n cin cout cout_per_group d h w kd kh kw: Nat}
+    (groups: Nat, stride dilation padding output_padding: «3; Nat»)
+    (input: «n, cin, d, h, w; A#R#T»,
+     weight: «cin, cout_per_group, kd, kh, kw; A#R#T»)
+  : «conv_transpose3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         stride, dilation, padding, output_padding); A#R#T» =
+    let cin_per_group = cin / groups;
+    let flipped_weight = torch_conv_transpose3d_weight A
+        @(cin, cout, cout_per_group, kd, kh, kw) groups weight;
+    let conv_padding = (
+        dilation#0_3 * (kd - 1) - padding#0_3,
+        dilation#1_3 * (kh - 1) - padding#1_3,
+        dilation#2_3 * (kw - 1) - padding#2_3);
+    let result = torch_grouped_conv3d A
+        @(n, cin, cout, cin_per_group, d, h, w, kd, kh, kw)
+        (groups, (1, 1, 1), dilation, conv_padding)
+        (input, flipped_weight);
+    let result_shape = conv3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         (1, 1, 1), dilation, conv_padding);
+    let output_shape = conv_transpose3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         stride, dilation, padding, output_padding);
+    tensor.reshape @(A#R#T, 5, 5)
+        result_shape output_shape result;
+
+pub lam torch_grouped_conv_transpose3d_strided
+    (A: Arithmetic)
+    {n cin cout cout_per_group d h w kd kh kw: Nat}
+    (groups: Nat, stride dilation padding output_padding: «3; Nat»)
+    (input: «n, cin, d, h, w; A#R#T»,
+     weight: «cin, cout_per_group, kd, kh, kw; A#R#T»)
+  : «conv_transpose3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         stride, dilation, padding, output_padding); A#R#T» =
+    let ud = torch_conv_transpose_upsampled_dim
+        (d, stride#0_3, output_padding#0_3);
+    let uh = torch_conv_transpose_upsampled_dim
+        (h, stride#1_3, output_padding#1_3);
+    let uw = torch_conv_transpose_upsampled_dim
+        (w, stride#2_3, output_padding#2_3);
+
+    // Treat every depth plane as an NCHW image while inserting H/W zeros.
+    let plane_batch = n * d;
+    let planes = tensor.reshape @(A#R#T, 5, 4)
+        (n, cin, d, h, w) (plane_batch, cin, h, w) input;
+    let expanded_planes = torch_zero_insert2d A
+        @(plane_batch, cin, h, w)
+        ((stride#1_3, stride#2_3),
+         (output_padding#1_3, output_padding#2_3))
+        planes;
+    let spatially_expanded = tensor.reshape @(A#R#T, 4, 5)
+        (plane_batch, cin, uh, uw) (n, cin, d, uh, uw)
+        expanded_planes;
+
+    // Move D to a 2-D helper's height axis and collapse N/H/W into batch.
+    let depth_major = tensor.transpose @(A#R#T, 5)
+        (0_5, 3_5, 4_5, 1_5, 2_5) spatially_expanded;
+    let depth_batch = n * (uh * uw);
+    let depth_rows = tensor.reshape @(A#R#T, 5, 4)
+        (n, uh, uw, cin, d) (depth_batch, cin, d, 1)
+        depth_major;
+    let expanded_depth_rows = torch_zero_insert2d A
+        @(depth_batch, cin, d, 1)
+        ((stride#0_3, 1), (output_padding#0_3, 0))
+        depth_rows;
+    let expanded_depth_major = tensor.reshape @(A#R#T, 4, 5)
+        (depth_batch, cin, ud, 1) (n, uh, uw, cin, ud)
+        expanded_depth_rows;
+    let upsampled = tensor.transpose @(A#R#T, 5)
+        (0_5, 3_5, 4_5, 1_5, 2_5) expanded_depth_major;
+
+    let unit_result = torch_grouped_conv_transpose3d_unit_stride A
+        @(n, cin, cout, cout_per_group, ud, uh, uw, kd, kh, kw)
+        (groups, (1, 1, 1), dilation, padding, (0, 0, 0))
+        (upsampled, weight);
+    let unit_shape = conv_transpose3d_shape
+        (n, cout, (ud, uh, uw), (kd, kh, kw),
+         (1, 1, 1), dilation, padding, (0, 0, 0));
+    let output_shape = conv_transpose3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         stride, dilation, padding, output_padding);
+    tensor.reshape @(A#R#T, 5, 5)
+        unit_shape output_shape unit_result;
+
+pub lam torch_grouped_conv_transpose3d
+    (A: Arithmetic)
+    {n cin cout cout_per_group d h w kd kh kw: Nat}
+    (groups: Nat, stride dilation padding output_padding: «3; Nat»)
+    (input: «n, cin, d, h, w; A#R#T»,
+     weight: «cin, cout_per_group, kd, kh, kw; A#R#T»)
+  : «conv_transpose3d_shape
+        (n, cout, (d, h, w), (kd, kh, kw),
+         stride, dilation, padding, output_padding); A#R#T» =
+    let unit_stride = core.bit2.and_ 0 (
+        stride#0_3 == 1,
+        core.bit2.and_ 0 (
+            stride#1_3 == 1,
+            core.bit2.and_ 0 (
+                stride#2_3 == 1,
+                core.bit2.and_ 0 (
+                    output_padding#0_3 == 0,
+                    core.bit2.and_ 0 (
+                        output_padding#1_3 == 0,
+                        output_padding#2_3 == 0)))));
+    core.select
+        (unit_stride,
+         torch_grouped_conv_transpose3d_unit_stride A
+            @(n, cin, cout, cout_per_group, d, h, w, kd, kh, kw)
+            (groups, stride, dilation, padding, output_padding)
+            (input, weight),
+         torch_grouped_conv_transpose3d_strided A
+            @(n, cin, cout, cout_per_group, d, h, w, kd, kh, kw)
+            (groups, stride, dilation, padding, output_padding)
+            (input, weight));
+
+/// Python: `x * tanh(softplus(x, beta=1, threshold=20))`.
+pub lam torch_mish_scalar (F: Floating)
+                      (x: F#A#R#T): F#A#R#T =
+    let softplus = torch_softplus_scalar F
+        (F#from_nat 1, F#from_nat 20) x;
+    F#A#R#mul (x, torch_tanh_scalar F softplus);
+
+/// PyTorch masks an infinite reduction maximum to zero before shifting.
+pub lam torch_logsumexp_finite_max (F: Floating)
+                               (x: F#A#R#T): F#A#R#T =
+    let positive_inf = F#A#sub (F#A#R#_0, F#neg_inf);
+    let infinite = core.bit2.or_ 0 (
+        F#A#eq (x, F#neg_inf), F#A#eq (x, positive_inf));
+    core.select @F#A#R#T (infinite, F#A#R#_0, x);
+
+/// Stable multi-axis logsumexp without retained unit dimensions.
+/// Python reference:
+/// ```python
+/// maxes = amax(input, dims, keepdim=True)
+/// maxes = masked_fill(isinf(maxes), 0)
+/// return log(sum(exp(input - maxes), dims)) + squeeze(maxes, dims)
+/// ```
+pub lam torch_logsumexp_dims (F: Floating)
+    {r nr: Nat, s: «r; Nat»}
+    (dimensions: «nr; I64»)
+    (input: «s; F#A#R#T»)
+  : «torch_multi_reduce_shape
+        (s, torch_canonical_dims @(r, nr) dimensions); F#A#R#T» =
+    let dims = torch_canonical_dims @(r, nr) dimensions;
+    let ro = torch_reduced_rank dims;
+    let s_out = torch_multi_reduce_shape (s, dims);
+    let maximum = torch_multi_reduce
+        (F#A#maximum, F#neg_inf) (s, dims) input;
+    let finite_maximum = tensor.unary @(F#A#R#T, F#A#R#T)
+        (torch_logsumexp_finite_max F) @(ro, s_out) maximum;
+    let maximum_b = tensor.broadcast_in_dim @(F#A#R#T, ro, r)
+        (s_out, s, finite_maximum, torch_kept_axes dims);
+    let shifted = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#sub @(r, s) (input, maximum_b);
+    let exponentials = tensor.unary @(F#A#R#T, F#A#R#T)
+        (torch_exp_scalar F) @(r, s) shifted;
+    let total = torch_multi_reduce
+        (F#A#R#add, F#A#R#_0) (s, dims) exponentials;
+    let logarithm = tensor.unary @(F#A#R#T, F#A#R#T)
+        (torch_log_scalar F) @(ro, s_out) total;
+    tensor.binary @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#R#add @(ro, s_out) (logarithm, finite_maximum);
+
+/// Product of dimensions after N and C in an NCHW-like tensor.
+pub lam torch_group_norm_inner_size {r: Nat} (s: «r; Nat»): Nat =
+    let spatial_rank = r - 2;
+    let spatial_shape = ‹i: spatial_rank;
+        s#(core.idx 0 r 
+            (core.bitcast Nat i + 2))›;
+    torch_numel spatial_shape;
+
+/// Shifts a rank-2 tensor by `offset` along `dimension`. Padding supplies the
+/// reduction identity, and an identity projection keeps the original extent.
+pub lam torch_prefix_shift_2d
+    {T: *, m n: Nat}
+    (identity: T, dimension: Idx 2, offset: Nat)
+    (input: «m, n; T»): «m, n; T» =
+    let lo = ‹d: 2; core.select (
+        core.icmp.e @2 (dimension, d),
+        offset, 0)›;
+    let hi = (0, 0);
+    let padded = tensor.pad (m, n) (0, lo, hi) (input, identity);
+    tensor.map_reduce ((m, n), (m, n)) (torch_tensor_copy, ⊥: T)
+        (affine.id @2) (affine.id @2,) padded;
+
+/// Hillis-Steele prefix reduction. `extent`, `offset`, the selected axis and
+/// direction are closed for statically shaped Torch graphs, so PE unfolds this
+/// recursive lambda into distances 1, 2, 4, ... and removes the control flow.
+pub lam torch_prefix_2d
+    {T: *, m n: Nat}
+    (combine: [T, T] → T, identity: T,
+     dimension: Idx 2)
+    (input: «m, n; T»): «m, n; T» =
+    loop (1, input)
+    where
+        lam loop (offset: Nat, current: «m, n; T»)
+          @core.pe.is_closed ((m, n)#dimension): «m, n; T» =
+            let more = offset < (m, n)#dimension;
+            (core.select (more, step, done)) ()
+            where
+                lam step (): «m, n; T» =
+                    let shifted = torch_prefix_shift_2d
+                        @(T, m, n)
+                        (identity, dimension, offset) current;
+                    let next = tensor.binary @(T, T, T)
+                        combine @(2, (m, n)) (current, shifted);
+                    loop (offset * 2, next);
+                lam done (): «m, n; T» = current;
+            end;
+    end;
+
+pub lam torch_bool_to_i64 (value: Bool): I64 =
+    core.select @I64 (value, 1I64, 0I64);
+
+pub lam torch_i64_add (lhs rhs: I64): I64 =
+    core.wrap.add 0 (lhs, rhs);
+
+pub lam torch_reverse_window_out_map_2d
+    (indices: «3; affine.Index»): «2; affine.Index» =
+    (indices#0_3, indices#1_3);
+
+pub lam torch_reverse_window_in_map_2d
+    (dimension: Idx 2)
+    (indices: «3; affine.Index»): «2; affine.Index» =
+    let axis0 = core.icmp.e @2 (dimension, 0_2);
+    let shifted0 = affine.op.add (indices#0_3, indices#2_3);
+    let shifted1 = affine.op.add (indices#1_3, indices#2_3);
+    (core.select (axis0, shifted0, indices#0_3),
+     core.select (axis0, indices#1_3, shifted1));
+
+pub lam torch_reverse_tail_mask_2d
+    (dimension: Idx 2, threshold: Nat)
+    (indices: «2; I64»): Bool =
+    let axis0 = core.icmp.e @2 (dimension, 0_2);
+    let coordinate = core.select (axis0, indices#0_2, indices#1_2);
+    core.icmp.sge (coordinate, core.bitcast I64 threshold);
+
+/// Computes at most 64 suffix elements in their natural coordinate order.
+/// The padded read is `input[output + reduction]`, so its affine map contains
+/// no embedded constants.
+pub lam torch_reverse_tail_add_2d (F: Floating)
+    {m n: Nat} (dimension: Idx 2)
+    (input: «m, n; F#A#R#T»): «m, n; F#A#R#T» =
+    let shape = (m, n);
+    let extent = shape#dimension;
+    let window = core.select (extent < 64, extent, 64);
+    let extra = window - 1;
+    let hi = ‹d: 2; core.select (
+        core.icmp.e @2 (dimension, d), extra, 0)›;
+    let padded_shape = torch_pad_shape ((0, 0), shape, hi);
+    let padded = tensor.pad shape (0, (0, 0), hi)
+        (input, F#A#R#_0);
+    let iteration_shape = (m, n, window);
+    tensor.map_reduce @1 @(F#A#R#T, 2, 3)
+        (shape, iteration_shape)
+        @(F#A#R#T, 2, padded_shape)
+        (tensor.pool_fun F#A#R#add, F#A#R#_0)
+        torch_reverse_window_out_map_2d
+        (torch_reverse_window_in_map_2d dimension,)
+        padded;
+
+/// `sum(input, dim) - cumsum(input, dim) + input` is the inclusive reverse
+/// prefix sum. A short direct suffix reduction replaces its cancellation-prone
+/// tail while keeping the full scan logarithmic.
+pub lam torch_reverse_prefix_add_2d (F: Floating)
+    {m n: Nat} (dimension: Idx 2)
+    (input: «m, n; F#A#R#T»): «m, n; F#A#R#T» =
+    let shape = (m, n);
+    let forward = torch_prefix_2d @(F#A#R#T, m, n)
+        (F#A#R#add, F#A#R#_0, dimension) input;
+    let reduced_shape = torch_reduce_shape (shape, dimension);
+    let total = torch_reduce_dim
+        (F#A#R#add, F#A#R#_0) (shape, dimension) input;
+    let total_b = tensor.broadcast_in_dim @(F#A#R#T, 1, 2)
+        (reduced_shape, shape, total, torch_kept_dims @2 dimension);
+    let tail = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#sub @(2, shape) (total_b, forward);
+    let algebraic = tensor.binary
+        @(F#A#R#T, F#A#R#T, F#A#R#T)
+        F#A#R#add @(2, shape) (tail, input);
+    let extent = shape#dimension;
+    let window = core.select (extent < 64, extent, 64);
+    let threshold = extent - window;
+    let tail_mask = tensor.generate @(Bool, 2) shape
+        (torch_reverse_tail_mask_2d (dimension, threshold));
+    let exact_tail = torch_reverse_tail_add_2d F @(m, n)
+        dimension input;
+    tensor.select @(F#A#R#T) @(2, shape)
+        (tail_mask, exact_tail, algebraic);
+
+/// Python: reverse each requested coordinate, then read the source tensor.
+pub lam torch_flip_element {T: *, r nr: Nat}
+                       (s: «r; Nat», dimensions: «nr; Idx r»)
+                       (input: «s; T») (indices: «r; I64»): T =
+    let coords = ‹d: r;
+        let reverse = option.is_some
+            (vec.first (core.icmp.e @r) (dimensions, d));
+        let last = core.wrap.sub 0 (core.bitcast I64 (s#d), 1I64);
+        let coordinate = core.select (
+            reverse,
+            core.wrap.sub 0 (last, indices#d),
+            indices#d);
+        core.conv.u (s#d) coordinate›;
+    input#coords;
+
+pub lam torch_recurrent_binary (A: Arithmetic) {batch hidden: Nat}
+                           (op: [A#R#T, A#R#T] → A#R#T)
+                           (lhs rhs: «batch, hidden; A#R#T»): «batch, hidden; A#R#T» =
+    tensor.binary @(A#R#T, A#R#T, A#R#T) op @(2, (batch, hidden)) (lhs, rhs);
+
+pub lam torch_recurrent_unary {T: *, batch hidden: Nat}
+                          (op: T → T) (input: «batch, hidden; T»): «batch, hidden; T» =
+    tensor.unary @(T, T) op @(2, (batch, hidden)) input;
+
+/// The `gate`-th of `gates` equally sized column blocks.
+pub lam torch_gate_slice {T: *, gates batch hidden: Nat}
+                     (gate: Nat) (input: «batch, gates * hidden; T»): «batch, hidden; T» =
+    tensor.slice @(T, 2) (batch, gates * hidden)
+        ((0, gate * hidden), (1, 1), (batch, hidden)) input;
+
+pub lam torch_rnn_activation (F: Floating) (relu: Bool) (x: F#A#R#T): F#A#R#T =
+    core.select @F#A#R#T (relu, torch_relu_scalar F#A x, torch_tanh_scalar F x);

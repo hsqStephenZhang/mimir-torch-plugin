@@ -60,16 +60,16 @@ extern fun softmax_dynamic_dim(dimension: I64, input: «2, 4; Nat»): «2, 4; Na
 // CHECK: runtime.static_check
 // CHECK-LABEL: extern fun softmax_empty
 // CHECK-NOT: let maximum
-// CHECK: let unnormalized{{(_[0-9]+)?}} =
+// CHECK: return
 // CHECK-LABEL: extern fun softmax_nonempty
 // CHECK-NOT: runtime.static_check
 // CHECK: let maximum{{(_[0-9]+)?}} =
 // CHECK-NOT: let log_denominator
 
 // PROFILE: Profile (flat):
-// PROFILE-DAG: 3 torch.lower_torch: decompose.impl.torch.normalization.softmax
-// PROFILE-DAG: 1 torch.lower_torch: decompose.impl.torch.normalization.log_softmax
-// PROFILE-DAG: 1 torch.lower_torch: constraints.dynamic_residual
+// PROFILE-DAG: 3 `torch.lower_torch`: `decompose.impl.torch.normalization.softmax`
+// PROFILE-DAG: 1 `torch.lower_torch`: `decompose.impl.torch.normalization.log_softmax`
+// PROFILE-DAG: 1 `torch.lower_torch`: `constraints.dynamic_residual`
 extern lam _compile (): compile.Phase =
     compile.phases ff (
         torch.lower_torch,
