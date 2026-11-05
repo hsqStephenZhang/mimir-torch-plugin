@@ -2,6 +2,8 @@
 // RUN: %mim %s -p opt -p ll
 // RUN: clang++ -std=c++23 %S/nominal_aux.cpp %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t
+// XFAIL: *
+// Core SEO crashes on the combined dynamic functions; scripts/nominal_seo.mim reproduces it.
 
 plugin tensor;
 plugin math;

@@ -1,9 +1,0 @@
-ninja: Entering directory `build'
-[0/2] Re-checking globbed directories...
-[1/8] Copy '/private/tmp/claude-501/-Users-zc-courses-compiler-ml-compiler-mimir-frontend/f3d27865-6dcc-47cd-8dd9-371628be1d19/scratchpad/mimir-merge/extra/torch/torch.mim' to '/private/tmp/claude-501/-Users-zc-courses-compiler-ml-compiler-mimir-frontend/f3d27865-6dcc-47cd-8dd9-371628be1d19/scratchpad/mimir-merge/build/lib/mim/torch.mim'
-[2/8] Bootstrapping MimIR plugin '/private/tmp/claude-501/-Users-zc-courses-compiler-ml-compiler-mimir-frontend/f3d27865-6dcc-47cd-8dd9-371628be1d19/scratchpad/mimir-merge/extra/torch/torch.mim'
-[3/8] Staging MimIR lit tests
-[4/8] Building CXX object extra/torch/CMakeFiles/mim_torch.dir/src/torch.cpp.o
-[5/8] Building CXX object extra/torch/CMakeFiles/mim_torch.dir/src/normalizers.cpp.o
-[6/8] Building CXX object extra/torch/CMakeFiles/mim_torch.dir/src/phase/lower.cpp.o
-[7/8] Linking CXX shared module lib/mim/libmim_torch.so

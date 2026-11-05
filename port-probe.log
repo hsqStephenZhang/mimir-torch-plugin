@@ -1,4 +1,0 @@
-extra/torch/port-probe.mim:6:12-6:46: error: index must be of `Idx` type but is of type `⊥:*`
-    6 | let kept = torch.torch_reduction_shape @(1, 1) (4, 0_1, ff);
-      |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-1 error(s) encountered

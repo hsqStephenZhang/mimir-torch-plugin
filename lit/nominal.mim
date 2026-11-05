@@ -10,13 +10,9 @@ let F32 = math.F32;
 let singleton = tensor.from_array @(3, (1, 4, 1), F32) (0.0:F32, 1.0:F32, 2.0:F32, 3.0:F32);
 let _ = refly.struc.e (tensor.shape singleton, (1, 4, 1));
 
-// CHECK-LABEL: extern fun scalar_value
-// CHECK: tensor.scalar
 extern fun scalar_value (value: F32): tensor.Tensor 0 () F32 =
     return (torch.creation.scalar_tensor @F32 value);
 
-// CHECK-LABEL: extern fun singleton_axes
-// CHECK: tensor.map_reduce_post
 extern fun singleton_axes (input: tensor.Tensor 3 (1, 4, 1) F32): tensor.Tensor 1 4 F32 =
     return (torch.shape.reshape @(F32, 3, 1) ((1, 4, 1), 4) input);
 
@@ -31,6 +27,11 @@ extern fun dynamic_sum1 {n: Nat} (input: tensor.Tensor 1 n F32): tensor.Tensor 0
 extern fun dynamic_sum3 {n: Nat} (input: tensor.Tensor 3 (n, 1, 3) F32): tensor.Tensor 3 (n, 1, 1) F32 =
     return (torch.reduction.sum (torch.resolve_arithmetic F32)
         @(3, 1, (n, 1, 3)) (2I64, tt) input);
+
+// CHECK-LABEL: extern fun scalar_value
+// CHECK: tensor.scalar
+// CHECK-LABEL: extern fun singleton_axes
+// CHECK: tensor.map_reduce_post
 
 extern lam _compile (): compile.Phase =
     compile.phases ff (torch.lower_torch, tensor.lower_tensor, compile.cleanup);

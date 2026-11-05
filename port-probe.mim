@@ -1,7 +1,0 @@
-plugin tensor;
-plugin torch;
-plugin math;
-
-let shape = torch.torch_multi_reduce_shape @(1, 1) (4, 0_1);
-let kept = torch.torch_reduction_shape @(1, 1) (4, 0_1, ff);
-let Result = torch.ReductionTensor @(math.F32, 1, 1) (4, 0_1, ff);
