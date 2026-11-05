@@ -59,25 +59,3 @@ Their tensor types now preserve logical rank, including rank zero.
 `ReductionTensor` result that preserves the selected `keepdim` shape. Existing
 explicit scalar-returning schemas such as `sum_all` remain scalar-returning.
 Unreduced losses remain tensors; reduced loss schemas retain scalar results.
-
-### Upstream blockers
-
-Three tests retain their original RUN/CHECK assertions but are marked XFAIL:
-
-- `generic_cross_entropy.mim`: core `World::match` dispatch calls `inj` on a
-  payload already having a nominal Tensor type. `src/mim/world.cpp:1090`
-  reaches the nominal-construction branch at line 986 instead of preserving
-  the value. Run `build/bin/mim extra/torch/scripts/nominal_union.mim -o /dev/null`
-  from the MimIR root; this reproducer does not import the torch plugin.
-- `cross_entropy_invalid_smoothing.mim`: the same dispatch error occurs before
-  the intended invalid-smoothing diagnostic.
-- `nominal_exec.mim`: combining `dynamic_relu1` and `dynamic_sum1` crashes in
-  `SEO::Analysis::non_mem_free_vars` (`src/mim/plug/mem/phase/seo.cpp:252`).
-  Its `isa_mem` call reaches `Axm::get` with a null type via
-  `include/mim/plug/core/core.h:127`. Run
-  `build/bin/mim extra/torch/scripts/nominal_seo.mim -p opt -p ll` from the
-  MimIR root. Each of the eight execution-test functions compiles in isolation;
-  linking those individual LLVM modules passes the original numerical harness.
-
-`generic_reductions.mim` passes, including singleton keepdim axes and mixed
-dtype reductions. No MimIR core or runtime-plugin files were changed.

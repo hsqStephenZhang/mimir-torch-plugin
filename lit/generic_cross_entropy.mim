@@ -2,8 +2,6 @@
 // RUN:   --implicit-check-not=torch.loss \
 // RUN:   --implicit-check-not=torch.normalization \
 // RUN:   --implicit-check-not=torch.indexing --implicit-check-not=Match
-// XFAIL: *
-// Core World::match re-injects an existing nominal Tensor; scripts/nominal_union.mim reproduces it.
 
 plugin tensor;
 plugin math;
