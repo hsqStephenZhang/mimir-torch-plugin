@@ -26,13 +26,13 @@ let NatArithmetic: torch.Arithmetic = (
 // CHECK-LABEL: extern fun convolution1d_stride
 // CHECK: tensor.map_reduce
 extern fun convolution1d_stride(
-    input: «1, 4, 16; Nat»,
-    weight: «8, 4, 3; Nat»,
-    bias: «8; Nat»): «1, 8, 8; Nat» =
+    input: (tensor.Tensor 3 (1, 4, 16) Nat),
+    weight: (tensor.Tensor 3 (8, 4, 3) Nat),
+    bias: (tensor.Tensor 1 8 Nat)): (tensor.Tensor 3 (1, 8, 8) Nat) =
     return (torch.conv.conv1d NatArithmetic
         @(1, 4, 8, 4, 16, 3)
         (2, 1, 1, ff, 0, 1)
-        (input, weight, option.some bias));
+        (input, weight, option.Opt#Some bias));
 
 // PROFILE: Profile (flat):
 // PROFILE-DAG: 1 `torch.lower_torch`: `decompose.impl.torch.conv.conv1d`

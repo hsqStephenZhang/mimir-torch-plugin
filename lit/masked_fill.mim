@@ -9,8 +9,8 @@ plugin compile;
 // CHECK-LABEL: extern fun masked_fill_broadcast
 // CHECK-COUNT-2: tensor.map_reduce
 extern fun masked_fill_broadcast(
-    input: «2, 4, 8, 8; math.F32», mask: «8, 8; Bool»)
-  : «2, 4, 8, 8; math.F32» =
+    input: (tensor.Tensor 4 (2, 4, 8, 8) math.F32), mask: (tensor.Tensor 2 (8, 8) Bool))
+  : (tensor.Tensor 4 (2, 4, 8, 8) math.F32) =
     return (torch.pointwise.masked_fill_scalar
         @(math.F32, 2, 4) ((8, 8), (2, 4, 8, 8), (2₄, 3₄))
         (input, mask, 0.0:math.F32));

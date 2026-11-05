@@ -9,8 +9,8 @@ plugin compile;
 // CHECK-LABEL: extern fun max_pool3d
 // CHECK: tensor.pad
 // CHECK: tensor.map_reduce
-extern fun max_pool3d(input: «2, 3, 5, 7, 9; math.F32»)
-                    : «2, 3, 3, 4, 5; math.F32» =
+extern fun max_pool3d(input: (tensor.Tensor 5 (2, 3, 5, 7, 9) math.F32))
+                    : (tensor.Tensor 5 (2, 3, 3, 4, 5) math.F32) =
     return (torch.pool.max_pool3d (torch.resolve_floating math.F32)
         @(2, 3, 5, 7, 9)
         ((3, 3, 3), (2, 2, 2), (1, 1, 1), (1, 1, 1), tt)

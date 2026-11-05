@@ -1,6 +1,7 @@
 // RUN: (! %mim %s -o /dev/null 2>&1) | %FileCheck %s
 
 plugin core;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -29,7 +30,7 @@ let NatFloating: torch.Floating = (
     core.nat.mul,
 );
 
-extern fun softmax_invalid_dim(input: «2, 4; Nat»): «2, 4; Nat» =
+extern fun softmax_invalid_dim(input: (tensor.Tensor 2 (2, 4) Nat)): (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.normalization.softmax NatFloating @(2, (2, 4)) (2I64, ff) input);
 
 // CHECK: softmax expects rank > 0, an in-range dim, and half_to_float=false

@@ -1,6 +1,7 @@
 // RUN: (! %mim %s -o /dev/null 2>&1) | %FileCheck %s
 
 plugin core;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -23,8 +24,8 @@ let NatArithmetic: torch.Arithmetic = (
 // The extents happen to match after reversing the axes, but PyTorch broadcast
 // dimensions must preserve source-axis order.
 extern fun invalid_addmm_dimension_order(
-    self: «4, 2; Nat», mat1: «2, 3; Nat», mat2: «3, 4; Nat»)
-  : «2, 4; Nat» =
+    self: (tensor.Tensor 2 (4, 2) Nat), mat1: (tensor.Tensor 2 (2, 3) Nat), mat2: (tensor.Tensor 2 (3, 4) Nat))
+  : (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.linalg.addmm NatArithmetic
         @(2, 2, 3, 4) ((4, 2), (1_2, 0_2)) (self, mat1, mat2) (1, 1));
 

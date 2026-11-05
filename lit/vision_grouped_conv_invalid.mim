@@ -2,6 +2,7 @@
 
 plugin core;
 plugin option;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -22,12 +23,12 @@ let NatArithmetic: torch.Arithmetic = (
 );
 
 extern fun invalid_groups(
-    input: «1, 4, 5, 5; Nat»,
-    weight: «8, 2, 3, 3; Nat»): «1, 8, 3, 3; Nat» =
+    input: (tensor.Tensor 4 (1, 4, 5, 5) Nat),
+    weight: (tensor.Tensor 4 (8, 2, 3, 3) Nat)): (tensor.Tensor 4 (1, 8, 3, 3) Nat) =
     return (torch.conv.general NatArithmetic
         @(1, 4, 8, 2, 5, 5, 3, 3)
         ((1, 1), (0, 0), (1, 1), ff, (0, 0), 3)
-        (input, weight, option.none @(«8; Nat»)));
+        (input, weight, (option.Opt@((tensor.Tensor 1 8 Nat)))#None));
 
 extern lam _compile (): compile.Phase = torch.lower_torch;
 

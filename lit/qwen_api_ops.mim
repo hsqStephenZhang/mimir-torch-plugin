@@ -13,10 +13,10 @@ plugin runtime;
 plugin compile;
 
 extern fun qwen_api_ops (
-    input: «2, 3, 4; I32»,
-    weight: «8, 4; I32»,
-    indices: «2, 3; I64»)
-  : [«2, 4, 3; I32», «2, 3, 4; I32», «2, 3; I64»] =
+    input: (tensor.Tensor 3 (2, 3, 4) I32),
+    weight: (tensor.Tensor 2 (8, 4) I32),
+    indices: (tensor.Tensor 2 (2, 3) I64))
+  : [(tensor.Tensor 3 (2, 4, 3) I32), (tensor.Tensor 3 (2, 3, 4) I32), (tensor.Tensor 2 (2, 3) I64)] =
     return (
         torch.shape.transpose_int @(I32, 3, (2, 3, 4))
             (input, -2I64, -1I64),

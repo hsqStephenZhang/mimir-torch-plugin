@@ -1,0 +1,5 @@
+build/lit/tests/extra/torch/arg_extrema.mim:34:24: error: identifier ``-` not found
+   34 |      (tensor.Tensor (2 - 1) (torch.torch_reduce_shape ((2, 3), torch.torch_canonical_dim @2 dimension)) Nat),
+      |                        ^
+      = note: an infix operator means whatever you bind its escaped name to
+1 error(s) encountered

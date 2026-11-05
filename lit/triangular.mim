@@ -7,7 +7,7 @@ plugin runtime;
 plugin compile;
 
 // A known rank >= 2 proves the precondition and leaves no runtime guard.
-extern lam triangular_static(input: «2, 3; I32»): [«2, 3; I32», «2, 3; I32»] =
+extern lam triangular_static(input: (tensor.Tensor 2 (2, 3) I32)): [(tensor.Tensor 2 (2, 3) I32), (tensor.Tensor 2 (2, 3) I32)] =
     (
         torch.linalg.triu @(I32, 2, (2, 3)) (0I32, 1I64) input,
         torch.linalg.tril @(I32, 2, (2, 3)) (0I32, -1I64) input,
@@ -19,7 +19,7 @@ extern lam triangular_static(input: «2, 3; I32»): [«2, 3; I32», «2, 3; I32�
 // CHECK: core.ncmp.GlE
 // CHECK: runtime.static_check
 extern lam triangular_dynamic {r: Nat, s: «r; Nat»}
-                               (input: «s; I32»): «s; I32» =
+                               (input: (tensor.Tensor r s I32)): (tensor.Tensor r s I32) =
     torch.linalg.triu @(I32, r, s) (0I32, 0I64) input;
 
 // CHECK-LABEL: extern lam triangular_static

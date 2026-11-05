@@ -40,16 +40,16 @@ let NatFloating: torch.Floating = (
     core.nat.mul,
 );
 
-extern fun mean_keepdim(input: «2, 3, 4; Nat»): «2, 1, 1; Nat» =
+extern fun mean_keepdim(input: (tensor.Tensor 3 (2, 3, 4) Nat)): (tensor.Tensor 3 (2, 1, 1) Nat) =
     return (torch.reduction.mean_dims_keepdim NatFloating
         @(3, 2, (2, 3, 4)) (-2I64, -1I64) input);
 
 extern fun batch_norm_without_affine(
-    input: «1, 3, 2, 2; Nat»,
-    running_mean running_var: «3; Nat»): «1, 3, 2, 2; Nat» =
+    input: (tensor.Tensor 4 (1, 3, 2, 2) Nat),
+    running_mean running_var: (tensor.Tensor 1 3 Nat)): (tensor.Tensor 4 (1, 3, 2, 2) Nat) =
     return (torch.normalization.batch_norm_inference NatFloating
         @(4, (1, 3, 2, 2))
-        (input, option.none @(«3; Nat»), option.none @(«3; Nat»),
+        (input, (option.Opt@((tensor.Tensor 1 3 Nat)))#None, (option.Opt@((tensor.Tensor 1 3 Nat)))#None,
          running_mean, running_var, 0));
 
 extern lam _compile (): compile.Phase =

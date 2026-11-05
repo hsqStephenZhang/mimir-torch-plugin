@@ -1,0 +1,116 @@
+plugin opt;
+plugin compile;
+plugin core;
+import compile;
+plugin mem;
+plugin tensor;
+plugin tuple;
+plugin refly;
+plugin option;
+plugin vec;
+plugin cps;
+plugin affine;
+import mem;
+import core;
+plugin buffer;
+plugin btensor;
+import ll;
+plugin math;
+plugin torch;
+plugin runtime;
+import "/private/tmp/claude-501/-Users-zc-courses-compiler-ml-compiler-mimir-frontend/f3d27865-6dcc-47cd-8dd9-371628be1d19/scratchpad/mimir-merge/build/lib/mim/helper.mim";
+import tensor;
+import math;
+import affine;
+import runtime;
+import vec;
+import option;
+
+lam _1 (x: math.F (23, 8)): Bool =
+    math.cmp.Ugle 0 @ (23, 8) ‹2; x›;
+
+lam _2 (x_1: math.F (23, 8)): Bool =
+    math.cmp.uglE 0 @ (23, 8) (0:(math.F (23, 8)), x_1);
+
+lam _3 (x_2: math.F (23, 8)): math.F (23, 8) =
+    let _4 = math.rt.sq 0 @ (23, 8) x_2;
+    math.arith.div 0 @ (23, 8) (1065353216:(math.F (23, 8)), _4);
+
+lam _5 (x_3: Nat): math.F (23, 8) =
+    let _6 = core.bitcast @ Nat I64 x_3;
+    math.conv.u2f @ 0 (23, 8) _6;
+
+extern fun amax_all (input: tensor.Tensor 1 8 (math.F (23, 8))): math.F (23, 8) =
+    let _7 = torch.reduction.amax_all (((math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 16 @ (23, 8), math.arith.mul 16 @ (23, 8)), math.arith.sub 0 @ (23, 8), math.arith.div 0 @ (23, 8), math.extrema.IM 0 @ (23, 8), math.extrema.Im 0 @ (23, 8), math.cmp.uglE 0 @ (23, 8), math.cmp.uGLe 0 @ (23, 8), math.cmp.ugLe 0 @ (23, 8), math.cmp.ugLE 0 @ (23, 8), math.cmp.uGle 0 @ (23, 8), math.cmp.uGlE 0 @ (23, 8), _1, _2), 4286578688:(math.F (23, 8)), math.exp.lbb 0 @ (23, 8), math.exp.Lbb 0 @ (23, 8), math.tri.aHFf 0 @ (23, 8), math.er.f 0 @ (23, 8), math.rt.sq 0 @ (23, 8), _3, math.tri.ahff 0 @ (23, 8), math.tri.ahfF 0 @ (23, 8), _5, math.pow 0 @ (23, 8)) @ (1, 8) input;
+    return _7;
+
+extern fun generic_amax (input_1: tensor.Tensor 3 (2, 3, 4) (math.F (23, 8))): tensor.Tensor 1 3 (math.F (23, 8)) =
+    let _8 = torch.reduction.amax (((math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 16 @ (23, 8), math.arith.mul 16 @ (23, 8)), math.arith.sub 0 @ (23, 8), math.arith.div 0 @ (23, 8), math.extrema.IM 0 @ (23, 8), math.extrema.Im 0 @ (23, 8), math.cmp.uglE 0 @ (23, 8), math.cmp.uGLe 0 @ (23, 8), math.cmp.ugLe 0 @ (23, 8), math.cmp.ugLE 0 @ (23, 8), math.cmp.uGle 0 @ (23, 8), math.cmp.uGlE 0 @ (23, 8), _1, _2), 4286578688:(math.F (23, 8)), math.exp.lbb 0 @ (23, 8), math.exp.Lbb 0 @ (23, 8), math.tri.aHFf 0 @ (23, 8), math.er.f 0 @ (23, 8), math.rt.sq 0 @ (23, 8), _3, math.tri.ahff 0 @ (23, 8), math.tri.ahfF 0 @ (23, 8), _5, math.pow 0 @ (23, 8)) @ (3, 2, (2, 3, 4)) ((0I64, 2I64), ff) input_1;
+    return _8;
+
+extern fun generic_logsumexp (input_2: tensor.Tensor 3 (2, 3, 4) (math.F (23, 8))): tensor.Tensor 3 (2, 1, 4) (math.F (23, 8)) =
+    let _9 = torch.reduction.logsumexp (((math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 16 @ (23, 8), math.arith.mul 16 @ (23, 8)), math.arith.sub 0 @ (23, 8), math.arith.div 0 @ (23, 8), math.extrema.IM 0 @ (23, 8), math.extrema.Im 0 @ (23, 8), math.cmp.uglE 0 @ (23, 8), math.cmp.uGLe 0 @ (23, 8), math.cmp.ugLe 0 @ (23, 8), math.cmp.ugLE 0 @ (23, 8), math.cmp.uGle 0 @ (23, 8), math.cmp.uGlE 0 @ (23, 8), _1, _2), 4286578688:(math.F (23, 8)), math.exp.lbb 0 @ (23, 8), math.exp.Lbb 0 @ (23, 8), math.tri.aHFf 0 @ (23, 8), math.er.f 0 @ (23, 8), math.rt.sq 0 @ (23, 8), _3, math.tri.ahff 0 @ (23, 8), math.tri.ahfF 0 @ (23, 8), _5, math.pow 0 @ (23, 8)) @ (3, 1, (2, 3, 4)) (18446744073709551614I64, tt) input_2;
+    return _9;
+
+extern fun generic_mean (input_3: tensor.Tensor 3 (2, 3, 4) (math.F (23, 8))): tensor.Tensor 3 (2, 1, 4) (math.F (23, 8)) =
+    let _10 = torch.reduction.mean (((math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 16 @ (23, 8), math.arith.mul 16 @ (23, 8)), math.arith.sub 0 @ (23, 8), math.arith.div 0 @ (23, 8), math.extrema.IM 0 @ (23, 8), math.extrema.Im 0 @ (23, 8), math.cmp.uglE 0 @ (23, 8), math.cmp.uGLe 0 @ (23, 8), math.cmp.ugLe 0 @ (23, 8), math.cmp.ugLE 0 @ (23, 8), math.cmp.uGle 0 @ (23, 8), math.cmp.uGlE 0 @ (23, 8), _1, _2), 4286578688:(math.F (23, 8)), math.exp.lbb 0 @ (23, 8), math.exp.Lbb 0 @ (23, 8), math.tri.aHFf 0 @ (23, 8), math.er.f 0 @ (23, 8), math.rt.sq 0 @ (23, 8), _3, math.tri.ahff 0 @ (23, 8), math.tri.ahfF 0 @ (23, 8), _5, math.pow 0 @ (23, 8)) @ (3, 1, (2, 3, 4)) (1I64, tt) input_3;
+    return _10;
+
+extern fun generic_norm_p0 (input_4: tensor.Tensor 3 (2, 3, 4) (math.F (23, 8))): tensor.Tensor 3 (2, 1, 4) (math.F (23, 8)) =
+    let _11 = torch.reduction.vector_norm (((math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 16 @ (23, 8), math.arith.mul 16 @ (23, 8)), math.arith.sub 0 @ (23, 8), math.arith.div 0 @ (23, 8), math.extrema.IM 0 @ (23, 8), math.extrema.Im 0 @ (23, 8), math.cmp.uglE 0 @ (23, 8), math.cmp.uGLe 0 @ (23, 8), math.cmp.ugLe 0 @ (23, 8), math.cmp.ugLE 0 @ (23, 8), math.cmp.uGle 0 @ (23, 8), math.cmp.uGlE 0 @ (23, 8), _1, _2), 4286578688:(math.F (23, 8)), math.exp.lbb 0 @ (23, 8), math.exp.Lbb 0 @ (23, 8), math.tri.aHFf 0 @ (23, 8), math.er.f 0 @ (23, 8), math.rt.sq 0 @ (23, 8), _3, math.tri.ahff 0 @ (23, 8), math.tri.ahfF 0 @ (23, 8), _5, math.pow 0 @ (23, 8)) @ (3, 1, (2, 3, 4)) (1I64, tt, 0:(math.F (23, 8))) input_4;
+    return _11;
+
+extern fun generic_norm_p2 (input_5: tensor.Tensor 3 (2, 3, 4) (math.F (23, 8))): tensor.Tensor 2 (2, 4) (math.F (23, 8)) =
+    let _12 = torch.reduction.vector_norm (((math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 16 @ (23, 8), math.arith.mul 16 @ (23, 8)), math.arith.sub 0 @ (23, 8), math.arith.div 0 @ (23, 8), math.extrema.IM 0 @ (23, 8), math.extrema.Im 0 @ (23, 8), math.cmp.uglE 0 @ (23, 8), math.cmp.uGLe 0 @ (23, 8), math.cmp.ugLe 0 @ (23, 8), math.cmp.ugLE 0 @ (23, 8), math.cmp.uGle 0 @ (23, 8), math.cmp.uGlE 0 @ (23, 8), _1, _2), 4286578688:(math.F (23, 8)), math.exp.lbb 0 @ (23, 8), math.exp.Lbb 0 @ (23, 8), math.tri.aHFf 0 @ (23, 8), math.er.f 0 @ (23, 8), math.rt.sq 0 @ (23, 8), _3, math.tri.ahff 0 @ (23, 8), math.tri.ahfF 0 @ (23, 8), _5, math.pow 0 @ (23, 8)) @ (3, 1, (2, 3, 4)) (1I64, ff, 1073741824:(math.F (23, 8))) input_5;
+    return _12;
+
+extern fun generic_var_mean (input_6: tensor.Tensor 3 (2, 3, 4) (math.F (23, 8))): [Bool, tensor.Tensor 3 (2, 1, 4) (math.F (23, 8)), tensor.Tensor 3 (2, 1, 4) (math.F (23, 8))] =
+    let _13 = torch.reduction.var_mean (((math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 16 @ (23, 8), math.arith.mul 16 @ (23, 8)), math.arith.sub 0 @ (23, 8), math.arith.div 0 @ (23, 8), math.extrema.IM 0 @ (23, 8), math.extrema.Im 0 @ (23, 8), math.cmp.uglE 0 @ (23, 8), math.cmp.uGLe 0 @ (23, 8), math.cmp.ugLe 0 @ (23, 8), math.cmp.ugLE 0 @ (23, 8), math.cmp.uGle 0 @ (23, 8), math.cmp.uGlE 0 @ (23, 8), _1, _2), 4286578688:(math.F (23, 8)), math.exp.lbb 0 @ (23, 8), math.exp.Lbb 0 @ (23, 8), math.tri.aHFf 0 @ (23, 8), math.er.f 0 @ (23, 8), math.rt.sq 0 @ (23, 8), _3, math.tri.ahff 0 @ (23, 8), math.tri.ahfF 0 @ (23, 8), _5, math.pow 0 @ (23, 8)) @ (3, 1, (2, 3, 4)) (1I64, 1065353216:(math.F (23, 8)), tt) input_6;
+    return _13;
+
+lam torch_reduction_i64_add (_: I64, _: I64) as args: I64 =
+    core.wrap.add 0 @ 0 args;
+
+lam torch_reduction_bool_to_i64 (x_4: Bool): I64 =
+    (0I64, 1I64)#x_4;
+
+extern fun sum_bool_default (input_7: tensor.Tensor 2 (2, 3) Bool): tensor.Tensor 1 2 I64 =
+    let _14 = torch.reduction.sum_typed (Bool, I64, 0I64, torch_reduction_i64_add, torch_reduction_bool_to_i64) @ (2, 1, (2, 3)) (1I64, ff) input_7;
+    return _14;
+
+lam _15 (x_5: I64): I64 =
+    x_5;
+
+extern fun sum_i64_default (input_8: tensor.Tensor 2 (2, 3) I64): tensor.Tensor 1 2 I64 =
+    let _16 = torch.reduction.sum_typed (I64, I64, 0I64, torch_reduction_i64_add, _15) @ (2, 1, (2, 3)) (1I64, ff) input_8;
+    return _16;
+
+lam torch_reduction_i64_to_f32 (x_6: I64): math.F (23, 8) =
+    math.conv.s2f @ 0 (23, 8) x_6;
+
+extern fun sum_i64_f32 (input_9: tensor.Tensor 2 (2, 3) I64): tensor.Tensor 1 2 (math.F (23, 8)) =
+    let _17 = torch.reduction.sum_typed (I64, math.F (23, 8), 0:(math.F (23, 8)), math.arith.add 0 @ (23, 8), torch_reduction_i64_to_f32) @ (2, 1, (2, 3)) (1I64, ff) input_9;
+    return _17;
+
+lam nat_max (t: Nat, f: Nat) as args_1: Nat =
+    let cond = core.ncmp.GlE args_1;
+    (f, t)#cond;
+
+lam nat_min (t_1: Nat, f_1: Nat) as args_2: Nat =
+    let cond_1 = core.ncmp.gLE args_2;
+    (f_1, t_1)#cond_1;
+
+lam nat_never (_: Nat): Bool =
+    ff;
+
+lam nat_is_zero (x_7: Nat): Bool =
+    core.ncmp.glE (0, x_7);
+
+extern fun sum_keep_dims (input_10: tensor.Tensor 3 (2, 3, 4) Nat): tensor.Tensor 3 (1, 3, 1) Nat =
+    let _18 = torch.reduction.sum ((Nat, 0, core.nat.add, core.nat.mul), core.nat.sub, core.nat.div, nat_max, nat_min, core.ncmp.glE, core.ncmp.GLe, core.ncmp.gLe, core.ncmp.gLE, core.ncmp.Gle, core.ncmp.GlE, nat_never, nat_is_zero) @ (3, 2, (2, 3, 4)) ((0I64, 18446744073709551615I64), tt) input_10;
+    return _18;
+
+extern fun sum_remove_dims (input_11: tensor.Tensor 3 (2, 3, 4) Nat): tensor.Tensor 1 3 Nat =
+    let _19 = torch.reduction.sum ((Nat, 0, core.nat.add, core.nat.mul), core.nat.sub, core.nat.div, nat_max, nat_min, core.ncmp.glE, core.ncmp.GLe, core.ncmp.gLe, core.ncmp.gLE, core.ncmp.Gle, core.ncmp.GlE, nat_never, nat_is_zero) @ (3, 2, (2, 3, 4)) ((0I64, 18446744073709551615I64), ff) input_11;
+    return _19;
+error: cannot coerce to `Tensor_1105282`

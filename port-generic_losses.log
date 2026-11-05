@@ -1,0 +1,13 @@
+/private/tmp/claude-501/-Users-zc-courses-compiler-ml-compiler-mimir-frontend/f3d27865-6dcc-47cd-8dd9-371628be1d19/scratchpad/mimir-merge/build/lib/mim/torch.mim:2888:9-2892:74: error: function body is not assignable to its declared codomain
+ 2888 |         lam body() =
+      |         ^^^^^^^^^^^^
+ 2889 |             let dims = torch_canonical_dims @(r, nr) dimensions;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 2890 |             let reduced = torch_multi_reduce
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 2891 |                 (A#R#add, A#R#_0) (s, dims) input;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 2892 |             torch_apply_keepdim @(A#R#T, r, nr) (s, dims, keepdim) reduced;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      = note: expected `Tensor_399354 ∪ Tensor_399497`, got `Tensor_399354 ∪ Tensor_399497`
+1 error(s) encountered

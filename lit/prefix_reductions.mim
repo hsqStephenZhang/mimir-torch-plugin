@@ -11,9 +11,9 @@ plugin compile;
 // CHECK-COUNT-8: tensor.pad
 // CHECK-NOT: torch_prefix_2d
 // CHECK-NOT: tensor.generate
-extern lam prefix_reductions(input: «2, 4; math.F32», mask: «2, 4; Bool»)
-  : [«2, 4; math.F32», «2, 4; math.F32»,
-     «2, 4; math.F32», «2, 4; I64»] =
+extern lam prefix_reductions(input: (tensor.Tensor 2 (2, 4) math.F32), mask: (tensor.Tensor 2 (2, 4) Bool))
+  : [(tensor.Tensor 2 (2, 4) math.F32), (tensor.Tensor 2 (2, 4) math.F32),
+     (tensor.Tensor 2 (2, 4) math.F32), (tensor.Tensor 2 (2, 4) I64)] =
     let F = torch.resolve_floating math.F32;
     (torch.scan.cumsum_2d F @(2, 4) 1I64 input,
      torch.scan.cumsum_2d_direction F @(2, 4) (1I64, tt) input,

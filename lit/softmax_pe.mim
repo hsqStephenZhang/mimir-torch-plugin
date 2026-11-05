@@ -34,22 +34,22 @@ let NatFloating: torch.Floating = (
 
 // A non-empty input keeps max-subtraction, while static checks and the signed
 // negative-dimension conversion disappear.
-extern fun softmax_nonempty(input: «2, 4; Nat»): «2, 4; Nat» =
+extern fun softmax_nonempty(input: (tensor.Tensor 2 (2, 4) Nat)): (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.normalization.softmax NatFloating @(2, (2, 4)) (-1I64, ff) input);
 
 // Zero extent selects the empty path before lowering, so no max reduction is
 // materialized. The sum reduction remains part of PyTorch's empty result formula.
-extern fun softmax_empty(input: «2, 0; Nat»): «2, 0; Nat» =
+extern fun softmax_empty(input: (tensor.Tensor 2 (2, 0) Nat)): (tensor.Tensor 2 (2, 0) Nat) =
     return (torch.normalization.softmax NatFloating @(2, (2, 0)) (1I64, ff) input);
 
 // The public operator fixes the mode statically; PE must select log-subtraction
 // rather than retaining the internal log/softmax branch.
-extern fun log_softmax_nonempty(input: «2, 4; Nat»): «2, 4; Nat» =
+extern fun log_softmax_nonempty(input: (tensor.Tensor 2 (2, 4) Nat)): (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.normalization.log_softmax NatFloating @(2, (2, 4)) (-1I64, ff) input);
 
 // A runtime dimension retains exactly the checked precondition. Its successful
 // continuation dominates canonicalization and all dimension-dependent indexing.
-extern fun softmax_dynamic_dim(dimension: I64, input: «2, 4; Nat»): «2, 4; Nat» =
+extern fun softmax_dynamic_dim(dimension: I64, input: (tensor.Tensor 2 (2, 4) Nat)): (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.normalization.softmax NatFloating @(2, (2, 4)) (dimension, ff) input);
 
 // Definitions are emitted in reverse declaration order.

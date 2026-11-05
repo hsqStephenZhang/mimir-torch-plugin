@@ -1,0 +1,4 @@
+build/lit/tests/extra/torch/nominal_exec.mim:28:26-28:57: error: index must be of `Idx` type but is of type `⊥:*`
+   28 |     return (tensor.item (torch.reduction.sum A @(1, 1, n) (0I64, ff) input));
+      |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1 error(s) encountered

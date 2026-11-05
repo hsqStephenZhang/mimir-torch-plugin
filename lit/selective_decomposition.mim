@@ -6,6 +6,7 @@
 
 plugin core;
 plugin option;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -41,25 +42,25 @@ let NatFloating: torch.Floating = (
 // LOWER-LABEL: extern fun selective_layer_norm
 // LOWER-NOT: torch.normalization.native_layer_norm
 // LOWER-NOT: torch.activation.relu
-extern fun selective_layer_norm(input: «2, 4; Nat»)
-  : [«2, 4; Nat», «2, 1; Nat», «2, 1; Nat»] =
+extern fun selective_layer_norm(input: (tensor.Tensor 2 (2, 4) Nat))
+  : [(tensor.Tensor 2 (2, 4) Nat), (tensor.Tensor 2 (2, 1) Nat), (tensor.Tensor 2 (2, 1) Nat)] =
     let activated = torch.activation.relu NatArithmetic @(2, (2, 4)) input;
     return (torch.normalization.native_layer_norm NatFloating
         @(1, 1) ((2,), (4,)) activated
-        ((option.none @«4; Nat»), (option.none @«4; Nat»)) 1);
+        (((option.Opt@(tensor.Tensor 1 4 Nat))#None), ((option.Opt@(tensor.Tensor 1 4 Nat))#None)) 1);
 
 // SUBTAG-LABEL: extern fun selective_activations
 // SUBTAG: torch.activation.relu
 // SUBTAG-NOT: torch.activation.tanh
-extern fun selective_activations(input: «2, 4; Nat»)
-  : [«2, 4; Nat», «2, 4; Nat»] =
+extern fun selective_activations(input: (tensor.Tensor 2 (2, 4) Nat))
+  : [(tensor.Tensor 2 (2, 4) Nat), (tensor.Tensor 2 (2, 4) Nat)] =
     return (
         torch.activation.relu NatArithmetic @(2, (2, 4)) input,
         torch.activation.tanh NatFloating @(2, (2, 4)) input);
 
 // LEAKY-LABEL: extern fun selective_leaky_relu
 // LEAKY: torch.activation.leaky_relu
-extern fun selective_leaky_relu(input: «2, 4; Nat»): «2, 4; Nat» =
+extern fun selective_leaky_relu(input: (tensor.Tensor 2 (2, 4) Nat)): (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.activation.leaky_relu NatFloating @(2, (2, 4))
         (input, 1));
 

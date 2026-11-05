@@ -29,7 +29,7 @@ let NatArithmetic: torch.Arithmetic = (
 
 // CHECK-LABEL: extern fun add
 // CHECK: tensor.map_reduce
-extern fun add(lhs rhs: «2, 3; Nat»): «2, 3; Nat» =
+extern fun add(lhs rhs: (tensor.Tensor 2 (2, 3) Nat)): (tensor.Tensor 2 (2, 3) Nat) =
     return (torch.binary.add NatArithmetic @(2, (2, 3)) (lhs, rhs, 1));
 
 // Static optional tensor arguments must normalize after Torch decomposition
@@ -39,22 +39,22 @@ extern fun add(lhs rhs: «2, 3; Nat»): «2, 3; Nat» =
 // CHECK-LABEL: extern fun linear_bias
 // CHECK: tensor.map_reduce_post {{.*}} SchedT)
 extern fun linear_bias(
-    input: «2, 3; Nat», weight: «4, 3; Nat», bias: «4; Nat»)
-  : «2, 4; Nat» =
+    input: (tensor.Tensor 2 (2, 3) Nat), weight: (tensor.Tensor 2 (4, 3) Nat), bias: (tensor.Tensor 1 4 Nat))
+  : (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.linalg.linear NatArithmetic @(1, 3, 4) (2,)
-        (input, weight) (option.some bias));
+        (input, weight) (option.Opt#Some bias));
 
 // CHECK-LABEL: extern fun linear_no_bias
 // CHECK: tensor.map_reduce_post {{.*}} SchedT)
-extern fun linear_no_bias(input: «2, 3; Nat», weight: «4, 3; Nat»)
-  : «2, 4; Nat» =
+extern fun linear_no_bias(input: (tensor.Tensor 2 (2, 3) Nat), weight: (tensor.Tensor 2 (4, 3) Nat))
+  : (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.linalg.linear NatArithmetic @(1, 3, 4) (2,)
-        (input, weight) (option.none @«4; Nat»));
+        (input, weight) ((option.Opt@(tensor.Tensor 1 4 Nat))#None));
 
 // A static non-empty shape folds the zero-extent guard before decomposition.
 // CHECK-LABEL: extern fun softmax_static
 // CHECK: tensor.map_reduce
-extern fun softmax_static(input: «4, 4; math.F32»): «4, 4; math.F32» =
+extern fun softmax_static(input: (tensor.Tensor 2 (4, 4) math.F32)): (tensor.Tensor 2 (4, 4) math.F32) =
     return (torch.normalization.softmax (torch.resolve_floating math.F32)
         @(2, (4, 4)) (-1I64, ff) input);
 

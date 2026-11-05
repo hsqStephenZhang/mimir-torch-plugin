@@ -1,0 +1,132 @@
+plugin opt;
+plugin compile;
+plugin core;
+import compile;
+plugin mem;
+plugin tensor;
+plugin tuple;
+plugin refly;
+plugin option;
+plugin vec;
+plugin cps;
+plugin affine;
+import mem;
+import core;
+plugin buffer;
+plugin btensor;
+import ll;
+plugin math;
+plugin torch;
+plugin runtime;
+import "/private/tmp/claude-501/-Users-zc-courses-compiler-ml-compiler-mimir-frontend/f3d27865-6dcc-47cd-8dd9-371628be1d19/scratchpad/mimir-merge/build/lib/mim/helper.mim";
+import tensor;
+import math;
+import affine;
+import runtime;
+import vec;
+import option;
+
+extern fun cat (_1: [tensor.Tensor 2 (2, 3) I32, tensor.Tensor 2 (1, 3) I32]): tensor.Tensor 2 ‹2; 3› I32 =
+    let _2 = tensor.concat @ (I32, 2, 2) ff @ ((2, 3), (1, 3)) _1;
+    return _2;
+
+let TSched = [N: *] → («2; Nat» → N) → N;
+
+lam _3 (N_1: *) (mk: «2; Nat» → N_1): N_1 =
+    mk (2, 0);
+
+fun f ((_: I32, y: I32) as _4)@(tt): I32 =
+    return y;
+
+fun _5 ((x: I32, None: []) as _6)@(tt): I32 =
+    return x;
+
+lam _7 (_: affine.Index, _: affine.Index) as o: «2; affine.Index» =
+    o;
+
+lam _8 (_9: affine.Index, _10: affine.Index) as o_1: «2; affine.Index» =
+    let _11 = affine.semiop.mul (_9, 0);
+    let _12 = affine.semiop.mul (_10, 1);
+    (_11, _12);
+
+extern fun expand (input: tensor.Tensor 2 (1, 3) I32): tensor.Tensor 2 (2, 3) I32 =
+    let _13 = tensor.map_reduce_post @ (1, 0) @ (I32, I32, 2, 2, TSched) ((2, 3), (2, 3), _3) (f, ⊥:I32, _5) _7 (_8, ()) (input, ());
+    return _13;
+
+lam _14 (N_2: *) (mk_1: «2; Nat» → N_2): N_2 =
+    mk_1 (2, 0);
+
+fun f_1 ((_: I32, y_1: I32) as _15)@(tt): I32 =
+    return y_1;
+
+fun _16 ((x_1: I32, None: []) as _17)@(tt): I32 =
+    return x_1;
+
+lam _18 (_: affine.Index, _: affine.Index) as o_2: «2; affine.Index» =
+    o_2;
+
+lam _19 (_: affine.Index, _: affine.Index) as o_3: «3; affine.Index» =
+    let _20 = affine.linearize @ 2 (o_3, (6, 4));
+    affine.delinearize @ 3 (_20, (2, 3, 4));
+
+extern fun flatten (input_1: tensor.Tensor 3 (2, 3, 4) I32): tensor.Tensor 2 (6, 4) I32 =
+    let _21 = tensor.map_reduce_post @ (1, 0) @ (I32, I32, 2, 2, TSched) ((6, 4), (6, 4), _14) (f_1, ⊥:I32, _16) _18 (_19, ()) (input_1, ());
+    return _21;
+
+lam _22 (_: affine.Index, _: affine.Index) as o_4: «3; affine.Index» =
+    let _23 = affine.linearize @ 2 (o_4, (2, 3));
+    affine.delinearize @ 3 (_23, (2, 3, 1));
+
+lam _24 (N_3: *) (mk_2: «2; Nat» → N_3): N_3 =
+    mk_2 (3, 0);
+
+fun f_2 ((_: I32, y_2: I32) as _25)@(tt): I32 =
+    return y_2;
+
+fun _26 ((x_2: I32, None: []) as _27)@(tt): I32 =
+    return x_2;
+
+lam _28 (_: affine.Index, _: affine.Index, _: affine.Index) as o_5: «3; affine.Index» =
+    o_5;
+
+lam _29 (_30: affine.Index, _31: affine.Index, _32: affine.Index) as o_6: «3; affine.Index» =
+    let _33 = affine.semiop.mul (_30, 1);
+    let _34 = affine.op.add (_33, affine.lit 0);
+    let _35 = affine.semiop.mul (_31, 1);
+    let _36 = affine.op.add (_35, affine.lit 0);
+    let _37 = affine.semiop.mul (_32, 1);
+    let _38 = affine.op.add (_37, affine.lit 2);
+    (_34, _36, _38);
+
+extern fun select (input_2: tensor.Tensor 3 (2, 3, 4) I32): tensor.Tensor 2 (2, 3) I32 =
+    let sliced = tensor.map_reduce_post @ (1, 0) @ (I32, I32, 3, 3, TSched) ((2, 3, 1), (2, 3, 1), _24) (f_2, ⊥:I32, _26) _28 (_29, ()) (input_2, ());
+    let _39 = tensor.map_reduce_post @ (1, 0) @ (I32, I32, 2, 2, TSched) ((2, 3), (2, 3), _14) (f_1, ⊥:I32, _16) _18 (_22, ()) (sliced, ());
+    return _39;
+
+lam _40 (_: affine.Index, _: affine.Index) as o_7: «3; affine.Index» =
+    let _41 = affine.linearize @ 2 (o_7, (2, 3));
+    affine.delinearize @ 3 (_41, (2, 1, 3));
+
+extern fun squeeze (input_3: tensor.Tensor 3 (2, 1, 3) I32): tensor.Tensor 2 (2, 3) I32 =
+    let _42 = tensor.map_reduce_post @ (1, 0) @ (I32, I32, 2, 2, TSched) ((2, 3), (2, 3), _14) (f_1, ⊥:I32, _16) _18 (_40, ()) (input_3, ());
+    return _42;
+
+lam _43 (N_4: *) (mk_3: «2; Nat» → N_4): N_4 =
+    mk_3 (3, 0);
+
+fun f_3 ((_: I32, y_3: I32) as _44)@(tt): I32 =
+    return y_3;
+
+fun _45 ((x_3: I32, None: []) as _46)@(tt): I32 =
+    return x_3;
+
+lam _47 (_: affine.Index, _: affine.Index, _: affine.Index) as o_8: «3; affine.Index» =
+    o_8;
+
+lam _48 (_: affine.Index, _: affine.Index, _: affine.Index) as o_9: «2; affine.Index» =
+    let _49 = affine.linearize @ 3 (o_9, (2, 1, 3));
+    affine.delinearize @ 2 (_49, (2, 3));
+
+extern fun unsqueeze (input_4: tensor.Tensor 2 (2, 3) I32): tensor.Tensor 3 (2, 1, 3) I32 =
+    let _50 = tensor.map_reduce_post @ (1, 0) @ (I32, I32, 3, 3, TSched) ((2, 1, 3), (2, 1, 3), _43) (f_3, ⊥:I32, _45) _47 (_48, ()) (input_4, ());
+    return _50;

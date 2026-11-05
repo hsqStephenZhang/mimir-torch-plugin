@@ -27,8 +27,8 @@ let NatArithmetic: torch.Arithmetic = (
 // CHECK: = tensor.map_reduce_post @ (2, 0)
 // CHECK-NOT: let broadcast_self{{(_[0-9]+)?}} =
 extern fun addmm_beta_zero(
-    self: «4; Nat», mat1: «2, 3; Nat», mat2: «3, 4; Nat»)
-  : «2, 4; Nat» =
+    self: (tensor.Tensor 1 4 Nat), mat1: (tensor.Tensor 2 (2, 3) Nat), mat2: (tensor.Tensor 2 (3, 4) Nat))
+  : (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.linalg.addmm NatArithmetic
         @(1, 2, 3, 4) ((4,), (1_2,)) (self, mat1, mat2) (0, 2));
 
@@ -37,8 +37,8 @@ extern fun addmm_beta_zero(
 // CHECK: = tensor.map_reduce_post @ (2, 0)
 // CHECK: let broadcast_self{{(_[0-9]+)?}} =
 extern fun addmm_with_self(
-    self: «2; Nat», mat1: «2, 3; Nat», mat2: «3, 4; Nat»)
-  : «2, 4; Nat» =
+    self: (tensor.Tensor 1 2 Nat), mat1: (tensor.Tensor 2 (2, 3) Nat), mat2: (tensor.Tensor 2 (3, 4) Nat))
+  : (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.linalg.addmm NatArithmetic
         @(1, 2, 3, 4) ((2,), (0_2,)) (self, mat1, mat2) (1, 1));
 

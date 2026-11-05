@@ -1,0 +1,5 @@
+build/lit/tests/extra/torch/nominal.mim:16:5-16:52: error: argument is not assignable to callee's domain
+   16 |     return (torch.creation.scalar_tensor @F32 value);
+      |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      = note: expected `Tensor`, got `math.F (23, 8)`
+1 error(s) encountered

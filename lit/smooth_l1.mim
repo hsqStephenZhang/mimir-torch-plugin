@@ -32,7 +32,7 @@ let NatFloating: torch.Floating = (
 
 // CHECK-LABEL: extern fun smooth_l1
 // CHECK: tensor.map_reduce
-extern fun smooth_l1(input: «17, 19; Nat», target: «17, 19; Nat»): Nat =
+extern fun smooth_l1(input: (tensor.Tensor 2 (17, 19) Nat), target: (tensor.Tensor 2 (17, 19) Nat)): Nat =
     return (torch.loss.smooth_l1_mean NatFloating
         @(2, (17, 19)) (input, target) 1);
 

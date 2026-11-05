@@ -1,6 +1,7 @@
 // RUN: (! %mim %s -o /dev/null 2>&1) | %FileCheck %s
 
 plugin core;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -23,7 +24,7 @@ let NatFloating: torch.Floating = (
     nat_identity, core.nat.mul,
 );
 
-extern fun empty_dim(input: «2, 0; Nat»): [Bool, «2; Nat», «2; I64»] =
+extern fun empty_dim(input: (tensor.Tensor 2 (2, 0) Nat)): [Bool, (tensor.Tensor 1 2 Nat), (tensor.Tensor 1 2 I64)] =
     return (torch.reduction.max_dim NatFloating @(2, (2, 0)) (1I64) input);
 
 // CHECK: max.dim expects an in-range non-empty dimension

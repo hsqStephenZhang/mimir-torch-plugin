@@ -1,0 +1,5 @@
+build/lit/tests/extra/torch/native_layer_norm_pe.mim:70:31: error: identifier ``+` not found
+   70 |      input: (tensor.Tensor (1 + rn) (vec.cat ((2,), normalized_shape)) Nat))
+      |                               ^
+      = note: an infix operator means whatever you bind its escaped name to
+1 error(s) encountered

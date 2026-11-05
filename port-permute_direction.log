@@ -1,0 +1,48 @@
+plugin opt;
+plugin compile;
+plugin core;
+import compile;
+plugin mem;
+plugin tensor;
+plugin tuple;
+plugin refly;
+plugin option;
+plugin vec;
+plugin cps;
+plugin affine;
+import mem;
+import core;
+plugin buffer;
+plugin btensor;
+import ll;
+plugin math;
+plugin torch;
+plugin runtime;
+import "/private/tmp/claude-501/-Users-zc-courses-compiler-ml-compiler-mimir-frontend/f3d27865-6dcc-47cd-8dd9-371628be1d19/scratchpad/mimir-merge/build/lib/mim/helper.mim";
+import tensor;
+import math;
+import affine;
+import runtime;
+import vec;
+import option;
+
+let TSched = [N: *] → («2; Nat» → N) → N;
+
+lam _1 (N_1: *) (mk: «2; Nat» → N_1): N_1 =
+    mk (3, 0);
+
+fun f ((_: I32, y: I32) as _2)@(tt): I32 =
+    return y;
+
+fun _3 ((x: I32, None: []) as _4)@(tt): I32 =
+    return x;
+
+lam _5 (_: affine.Index, _: affine.Index, _: affine.Index) as o: «3; affine.Index» =
+    o;
+
+lam _6 (_7: affine.Index, _8: affine.Index, _9: affine.Index) as o_1: «3; affine.Index» =
+    (_8, _9, _7);
+
+extern fun permute_rank3 (input: tensor.Tensor 3 (2, 3, 4) I32): tensor.Tensor 3 (4, 2, 3) I32 =
+    let _10 = tensor.map_reduce_post @ (1, 0) @ (I32, I32, 3, 3, TSched) ((4, 2, 3), (4, 2, 3), _1) (f, ⊥:I32, _3) _5 (_6, ()) (input, ());
+    return _10;

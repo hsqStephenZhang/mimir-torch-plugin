@@ -29,22 +29,22 @@ let NatFloating: torch.Floating = (
     core.nat.mul,
 );
 
-extern fun max_dim_dynamic(dimension: I64, input: «2, 3; Nat»)
+extern fun max_dim_dynamic(dimension: I64, input: (tensor.Tensor 2 (2, 3) Nat))
   : [Bool,
-     «torch.torch_reduce_shape ((2, 3), torch.torch_canonical_dim @2 dimension); Nat»,
-     «torch.torch_reduce_shape ((2, 3), torch.torch_canonical_dim @2 dimension); I64»] =
+     (tensor.Tensor 1 (torch.torch_reduce_shape ((2, 3), torch.torch_canonical_dim @2 dimension)) Nat),
+     (tensor.Tensor 1 (torch.torch_reduce_shape ((2, 3), torch.torch_canonical_dim @2 dimension)) I64)] =
     return (torch.reduction.max_dim NatFloating @(2, (2, 3)) dimension input);
 
 // CHECK-LABEL: extern fun max_dim
 // CHECK-COUNT-3: tensor.map_reduce
 // CHECK-LABEL: extern fun max_dim_dynamic
 // CHECK: runtime.static_check
-extern fun max_dim(input: «2, 3; Nat»): [Bool, «2; Nat», «2; I64»] =
+extern fun max_dim(input: (tensor.Tensor 2 (2, 3) Nat)): [Bool, (tensor.Tensor 1 2 Nat), (tensor.Tensor 1 2 I64)] =
     return (torch.reduction.max_dim NatFloating @(2, (2, 3)) (-1I64) input);
 
 // CHECK-LABEL: extern fun min_dim
 // CHECK-COUNT-3: tensor.map_reduce
-extern fun min_dim(input: «2, 3; Nat»): [Bool, «2; Nat», «2; I64»] =
+extern fun min_dim(input: (tensor.Tensor 2 (2, 3) Nat)): [Bool, (tensor.Tensor 1 2 Nat), (tensor.Tensor 1 2 I64)] =
     return (torch.reduction.min_dim NatFloating @(2, (2, 3)) (-1I64) input);
 
 extern lam _compile (): compile.Phase =

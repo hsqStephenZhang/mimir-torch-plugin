@@ -1,9 +1,10 @@
 // RUN: (! %mim %s -o - 2>&1) | %FileCheck %s
 
+plugin tensor;
 plugin torch;
 plugin compile;
 
-extern lam invalid_rank(input: «4; I32»): «4; I32» =
+extern lam invalid_rank(input: (tensor.Tensor 1 4 I32)): (tensor.Tensor 1 4 I32) =
     torch.linalg.triu @(I32, 1, (4,)) (0I32, 0I64) input;
 
 extern lam _compile (): compile.Phase = torch.lower_torch;

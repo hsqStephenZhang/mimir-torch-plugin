@@ -8,8 +8,8 @@ plugin tensor;
 plugin torch;
 plugin compile;
 
-extern fun view_ops(input: «2, 3, 4; I32»)
-  : [«6, 4; I32», «2, 4, 3; I32»] =
+extern fun view_ops(input: (tensor.Tensor 3 (2, 3, 4) I32))
+  : [(tensor.Tensor 2 (6, 4) I32), (tensor.Tensor 3 (2, 4, 3) I32)] =
     return (
         torch.shape.reshape @(I32, 3, 2)
             ((2, 3, 4), (6, 4)) input,

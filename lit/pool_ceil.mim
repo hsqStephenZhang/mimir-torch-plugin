@@ -35,7 +35,7 @@ let NatFloating: torch.Floating = (
     core.nat.mul,
 );
 
-extern fun pool_ceil(input: «1, 3, 14, 14; Nat»): «1, 3, 7, 7; Nat» =
+extern fun pool_ceil(input: (tensor.Tensor 4 (1, 3, 14, 14) Nat)): (tensor.Tensor 4 (1, 3, 7, 7) Nat) =
     return (torch.pool.max_pool2d NatFloating
         @(1, 3, 14, 14)
         ((3, 3), (2, 2), (0, 0), (1, 1), tt)

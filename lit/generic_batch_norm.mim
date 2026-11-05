@@ -13,14 +13,14 @@ plugin compile;
 // CHECK-LABEL: extern fun batch_norm_inference
 // CHECK: tensor.map_reduce
 extern fun batch_norm_inference(
-    input: «2, 3, 4, 5; math.F32»,
-    mean variance weight bias: «3; math.F32»)
-  : «2, 3, 4, 5; math.F32» =
+    input: (tensor.Tensor 4 (2, 3, 4, 5) math.F32),
+    mean variance weight bias: (tensor.Tensor 1 3 math.F32))
+  : (tensor.Tensor 4 (2, 3, 4, 5) math.F32) =
     return (torch.normalization.batch_norm
         (torch.resolve_floating math.F32)
         @(4, (2, 3, 4, 5))
-        (input, option.some weight, option.some bias,
-         option.some mean, option.some variance)
+        (input, option.Opt#Some weight, option.Opt#Some bias,
+         option.Opt#Some mean, option.Opt#Some variance)
         (ff, 0x3DCCCCCD:math.F32, 0x3727C5AC:math.F32, tt));
 
 // Static training computes channel-wise batch statistics over N,H,W and
@@ -28,14 +28,14 @@ extern fun batch_norm_inference(
 // CHECK-LABEL: extern fun batch_norm_training
 // CHECK: tensor.map_reduce
 // CHECK: tensor.map_reduce
-extern fun batch_norm_training(input: «2, 3, 4, 5; math.F32»)
-  : «2, 3, 4, 5; math.F32» =
+extern fun batch_norm_training(input: (tensor.Tensor 4 (2, 3, 4, 5) math.F32))
+  : (tensor.Tensor 4 (2, 3, 4, 5) math.F32) =
     return (torch.normalization.batch_norm
         (torch.resolve_floating math.F32)
         @(4, (2, 3, 4, 5))
         (input,
-         option.none @«3; math.F32», option.none @«3; math.F32»,
-         option.none @«3; math.F32», option.none @«3; math.F32»)
+         (option.Opt@(tensor.Tensor 1 3 math.F32))#None, (option.Opt@(tensor.Tensor 1 3 math.F32))#None,
+         (option.Opt@(tensor.Tensor 1 3 math.F32))#None, (option.Opt@(tensor.Tensor 1 3 math.F32))#None)
         (tt, 0x3DCCCCCD:math.F32, 0x3727C5AC:math.F32, ff));
 
 // Functionalization also exposes updated running statistics.
@@ -46,25 +46,25 @@ extern fun batch_norm_training(input: «2, 3, 4, 5; math.F32»)
 // CHECK-LABEL: extern fun native_batch_norm_training
 // CHECK: tensor.map_reduce
 extern fun native_batch_norm_training(
-    input: «2, 3, 4, 5; math.F32»,
-    weight bias: «3; math.F32»)
-  : [«2, 3, 4, 5; math.F32», «3; math.F32», «3; math.F32»] =
+    input: (tensor.Tensor 4 (2, 3, 4, 5) math.F32),
+    weight bias: (tensor.Tensor 1 3 math.F32))
+  : [(tensor.Tensor 4 (2, 3, 4, 5) math.F32), (tensor.Tensor 1 3 math.F32), (tensor.Tensor 1 3 math.F32)] =
     return (torch.normalization.native_batch_norm
         (torch.resolve_floating math.F32)
         @(4, (2, 3, 4, 5))
-        (input, option.some weight, option.some bias,
-         option.none @«3; math.F32», option.none @«3; math.F32»)
+        (input, option.Opt#Some weight, option.Opt#Some bias,
+         (option.Opt@(tensor.Tensor 1 3 math.F32))#None, (option.Opt@(tensor.Tensor 1 3 math.F32))#None)
         (tt, 0x3DCCCCCD:math.F32, 0x3727C5AC:math.F32));
 
 extern fun native_batch_norm_functional(
-    input: «2, 3, 4, 5; math.F32»,
-    weight bias mean variance: «3; math.F32»)
-  : [«2, 3, 4, 5; math.F32», «3; math.F32», «3; math.F32»,
-     «3; math.F32», «3; math.F32»] =
+    input: (tensor.Tensor 4 (2, 3, 4, 5) math.F32),
+    weight bias mean variance: (tensor.Tensor 1 3 math.F32))
+  : [(tensor.Tensor 4 (2, 3, 4, 5) math.F32), (tensor.Tensor 1 3 math.F32), (tensor.Tensor 1 3 math.F32),
+     (tensor.Tensor 1 3 math.F32), (tensor.Tensor 1 3 math.F32)] =
     return (torch.normalization.native_batch_norm_functional
         (torch.resolve_floating math.F32)
         @(4, (2, 3, 4, 5))
-        (input, option.some weight, option.some bias, mean, variance)
+        (input, option.Opt#Some weight, option.Opt#Some bias, mean, variance)
         (tt, 0x3E800000:math.F32, 0x3727C5AC:math.F32));
 
 extern lam _compile (): compile.Phase =

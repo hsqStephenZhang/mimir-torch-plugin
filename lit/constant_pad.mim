@@ -10,8 +10,8 @@ plugin compile;
 // CHECK-LABEL: extern fun constant_pad
 // CHECK: tensor.pad
 // CHECK-SAME: (0, (0, 0, 3, 1), (0, 0, 4, 2))
-extern fun constant_pad(input: «2, 3, 5, 7; math.F32»)
-  : «2, 3, 12, 10; math.F32» =
+extern fun constant_pad(input: (tensor.Tensor 4 (2, 3, 5, 7) math.F32))
+  : (tensor.Tensor 4 (2, 3, 12, 10) math.F32) =
     return (torch.creation.constant_pad @(math.F32, 4, 2, (2, 3, 5, 7))
         ((1, 2, 3, 4), 0:(math.F32)) input);
 

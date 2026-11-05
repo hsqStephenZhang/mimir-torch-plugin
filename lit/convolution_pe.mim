@@ -27,41 +27,41 @@ let NatArithmetic: torch.Arithmetic = (
 
 // Standard convolution keeps its concrete bias initializer.
 extern fun convolution_bias(
-    input: «1, 4, 8, 8; Nat»,
-    weight: «8, 4, 3, 3; Nat»,
-    bias: «8; Nat»): «1, 8, 8, 8; Nat» =
+    input: (tensor.Tensor 4 (1, 4, 8, 8) Nat),
+    weight: (tensor.Tensor 4 (8, 4, 3, 3) Nat),
+    bias: (tensor.Tensor 1 8 Nat)): (tensor.Tensor 4 (1, 8, 8, 8) Nat) =
     return (torch.conv.general NatArithmetic
         @(1, 4, 8, 4, 8, 8, 3, 3)
         ((1, 1), (1, 1), (1, 1), ff, (0, 0), 1)
-        (input, weight, option.some bias));
+        (input, weight, option.Opt#Some bias));
 
 // No-bias specialization materializes the zero initializer without retaining
 // an Optional branch.
 extern fun convolution_no_bias(
-    input: «1, 4, 8, 8; Nat»,
-    weight: «8, 4, 3, 3; Nat»): «1, 8, 8, 8; Nat» =
+    input: (tensor.Tensor 4 (1, 4, 8, 8) Nat),
+    weight: (tensor.Tensor 4 (8, 4, 3, 3) Nat)): (tensor.Tensor 4 (1, 8, 8, 8) Nat) =
     return (torch.conv.general NatArithmetic
         @(1, 4, 8, 4, 8, 8, 3, 3)
         ((1, 1), (1, 1), (1, 1), ff, (0, 0), 1)
-        (input, weight, option.none @«8; Nat»));
+        (input, weight, (option.Opt@(tensor.Tensor 1 8 Nat))#None));
 
 // Groups=2 specializes channel-group arithmetic before tensor lowering.
 extern fun convolution_grouped(
-    input: «1, 4, 8, 8; Nat»,
-    weight: «8, 2, 3, 3; Nat»): «1, 8, 6, 6; Nat» =
+    input: (tensor.Tensor 4 (1, 4, 8, 8) Nat),
+    weight: (tensor.Tensor 4 (8, 2, 3, 3) Nat)): (tensor.Tensor 4 (1, 8, 6, 6) Nat) =
     return (torch.conv.general NatArithmetic
         @(1, 4, 8, 2, 8, 8, 3, 3)
         ((1, 1), (0, 0), (1, 1), ff, (0, 0), 2)
-        (input, weight, option.none @«8; Nat»));
+        (input, weight, (option.Opt@(tensor.Tensor 1 8 Nat))#None));
 
 // Depthwise convolution is the groups=cin, cin_per_group=1 specialization.
 extern fun convolution_depthwise(
-    input: «1, 4, 8, 8; Nat»,
-    weight: «4, 1, 3, 3; Nat»): «1, 4, 6, 6; Nat» =
+    input: (tensor.Tensor 4 (1, 4, 8, 8) Nat),
+    weight: (tensor.Tensor 4 (4, 1, 3, 3) Nat)): (tensor.Tensor 4 (1, 4, 6, 6) Nat) =
     return (torch.conv.general NatArithmetic
         @(1, 4, 4, 1, 8, 8, 3, 3)
         ((1, 1), (0, 0), (1, 1), ff, (0, 0), 4)
-        (input, weight, option.none @«4; Nat»));
+        (input, weight, (option.Opt@(tensor.Tensor 1 4 Nat))#None));
 
 // CHECK-COUNT-4: tensor.map_reduce
 // An ungrouped convolution is `tensor.conv`, which schedules it; a grouped one stays an unscheduled reduction.
