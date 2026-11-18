@@ -10,8 +10,7 @@
 
 namespace mim::plug::torch::phase {
 
-/// Torch-local implementation decomposition. Keeping this utility private to
-/// the plugin avoids imposing an experimental decomposition API on MimIR core.
+/// Torch-local implementation decomposition, kept private to avoid imposing an experimental API on MimIR core.
 class DecomposeByImpl : public RWPhase {
 public:
     DecomposeByImpl(World& world, flags_t annex)

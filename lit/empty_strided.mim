@@ -7,7 +7,7 @@ plugin compile;
 
 // CHECK-LABEL: extern fun empty_strided
 // CHECK: tensor.splat
-extern fun empty_strided(): «2, 3; I32» =
+extern fun empty_strided(): (tensor.Tensor 2 (2, 3) I32) =
     return (torch.creation.empty_strided @(I32, 2) ((2, 3), (3, 1)));
 
 extern lam _compile (): compile.Phase =

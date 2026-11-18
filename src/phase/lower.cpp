@@ -91,7 +91,7 @@ const Def* DecomposeByImpl::decompose_generated(const Def* def) {
         auto new_arg    = decompose_generated(app->arg());
         auto new_callee = decompose_generated(app->callee());
         if (auto pi = new_callee->type()->isa<Pi>())
-            if (!Checker::assignable(pi->dom(), new_arg) && new_arg->num_projs() == pi->num_doms())
+            if (!Check::coerce(pi->dom(), new_arg) && new_arg->num_projs() == pi->num_doms())
                 new_arg = new_world().tuple(pi->dom(), DefVec(size_t(pi->num_doms()), [&](size_t i) {
                     return new_arg->proj(pi->num_doms(), i);
                 }));
@@ -113,7 +113,6 @@ const Def* DecomposeByImpl::decompose_generated(const Def* def) {
 }
 
 const Def* DecomposeByImpl::rewrite_imm_App(const App* app) {
-    if (is_bootstrapping()) return RWPhase::rewrite_imm_App(app);
     auto [axm, curry, remaining] = Axm::get(app);
     (void)remaining;
     if (!axm || curry != 0) return RWPhase::rewrite_imm_App(app);
@@ -190,7 +189,6 @@ Lower::Lower(World& world, flags_t annex, bool selective)
     }
 
     observe<runtime::static_check>("constraints.dynamic_residual");
-#define MIM_BIND_TORCH_IMPL(src) bind_if_enabled<torch::src, torch::src##_impl>(#src)
 #define MIM_BIND_TORCH_SUB(family, src, legacy)                                      \
     bind_sub_if_enabled<torch::family::src, torch::family##_impl::src>(              \
         #family "." #src, #legacy)
@@ -388,7 +386,6 @@ Lower::Lower(World& world, flags_t annex, bool selective)
 
     // Metadata-only framework assertions.
     MIM_BIND_TORCH_SUB(metadata, assert_tensor_metadata, assert_tensor_metadata_op);
-#undef MIM_BIND_TORCH_IMPL
 #undef MIM_BIND_TORCH_SUB
 
     if (!preserved_.empty())

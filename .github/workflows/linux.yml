@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         # svector's C++23 range members need gcc-15's libstdc++, which ubuntu-24.04 lacks.
-        # The `RUN: clang ...` lines in lit/ and `find_program(NAMES clang)` in cmake/Mim.cmake resolve to the `clang` package.
+        # lit's `RUN: clang` lines and `find_program(NAMES clang)` resolve to the `clang` package.
         include:
           - build-type: Debug
             cc: clang-20
@@ -60,11 +60,8 @@ jobs:
           sudo apt-get install -y clang llvm-20-tools ninja-build ${{matrix.packages}}
           sudo pip install lit psutil
 
-      # ccache hooks the compiler through its /usr/lib/ccache/<name> symlinks, which the action
-      # prepends to PATH -- so CC/CXX below must stay *bare names*; an absolute path would bypass
-      # them (see macos.yml, where it did). Keep this after the compiler install so the symlinks
-      # cover clang-20/g++-14. max_size is only a cap: 500M left the sanitizer build's cache at
-      # 99.84% with 6 eviction sweeps per run, evicting objects that then had to be recompiled.
+      # ccache hooks the compiler via /usr/lib/ccache symlinks on PATH, so CC/CXX must stay bare names,
+      # and this step must follow the compiler install. 500M caused evictions in the sanitizer build.
       - name: Setup ccache
         uses: Chocobo1/setup-ccache-action@v1
         with:

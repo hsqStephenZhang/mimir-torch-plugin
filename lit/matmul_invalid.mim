@@ -1,6 +1,7 @@
 // RUN: (! %mim %s -o /dev/null 2>&1) | %FileCheck %s
 
 plugin core;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -20,7 +21,7 @@ let NatArithmetic: torch.Arithmetic = (
     nat_never, nat_is_zero,
 );
 
-extern fun invalid_contract(lhs: «2, 3; Nat», rhs: «4, 5; Nat»): «2, 5; Nat» =
+extern fun invalid_contract(lhs: (tensor.Tensor 2 (2, 3) Nat), rhs: (tensor.Tensor 2 (4, 5) Nat)): (tensor.Tensor 2 (2, 5) Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(2, 2, (2, 3), (4, 5)) (lhs, rhs));
 

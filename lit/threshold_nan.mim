@@ -9,7 +9,7 @@ plugin math;
 plugin torch;
 plugin compile;
 
-extern fun threshold_f32(input: «4; math.F32»): «4; math.F32» =
+extern fun threshold_f32(input: (tensor.Tensor 1 4 math.F32)): (tensor.Tensor 1 4 math.F32) =
     return (torch.activation.threshold (torch.resolve_arithmetic math.F32)
         @(1, 4) (input, 0.5:math.F32, -2.0:math.F32));
 

@@ -25,7 +25,7 @@ let NatArithmetic: torch.Arithmetic = (
     nat_never, nat_is_zero,
 );
 
-extern fun pointwise(lhs rhs: «2, 3; Nat»): «2, 3; Nat» =
+extern fun pointwise(lhs rhs: (tensor.Tensor 2 (2, 3) Nat)): (tensor.Tensor 2 (2, 3) Nat) =
     return (torch.activation.relu NatArithmetic @(2, (2, 3))
         (torch.binary.add NatArithmetic @(2, (2, 3)) (lhs, rhs, 1)));
 

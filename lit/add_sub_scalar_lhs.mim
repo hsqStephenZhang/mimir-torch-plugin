@@ -13,11 +13,11 @@ plugin math;
 plugin torch;
 plugin compile;
 
-extern fun add_scalar_lhs(other: «4; math.F32»): «4; math.F32» =
+extern fun add_scalar_lhs(other: (tensor.Tensor 1 4 math.F32)): (tensor.Tensor 1 4 math.F32) =
     return (torch.binary.add_scalar_lhs (torch.resolve_arithmetic math.F32)
         @(1, 4) (2.0:math.F32, other, 3.0:math.F32));
 
-extern fun sub_scalar_lhs(other: «4; math.F32»): «4; math.F32» =
+extern fun sub_scalar_lhs(other: (tensor.Tensor 1 4 math.F32)): (tensor.Tensor 1 4 math.F32) =
     return (torch.binary.sub_scalar_lhs (torch.resolve_arithmetic math.F32)
         @(1, 4) (2.0:math.F32, other, 3.0:math.F32));
 

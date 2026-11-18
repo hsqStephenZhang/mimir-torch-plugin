@@ -14,32 +14,32 @@ plugin compile;
 // CHECK-DAG: math.arith.div {{.*}}1077936128:(math.F (23, 8))
 // CHECK-LABEL: extern fun correction_a_negative
 // CHECK: tensor.map_reduce
-extern fun correction_a_negative(input: «2, 2; math.F32»)
-    : [Bool, «2; math.F32», «2; math.F32»] =
+extern fun correction_a_negative(input: (tensor.Tensor 2 (2, 2) math.F32))
+    : [Bool, (tensor.Tensor 1 2 math.F32), (tensor.Tensor 1 2 math.F32)] =
     return (torch.reduction.var_mean_dims (torch.resolve_floating math.F32)
         @(2, 1, (2, 2)) ((1I64,), 0xBF800000:math.F32) input);
 
 // CHECK-DAG: math.arith.div {{.*}}0:(math.F (23, 8))
 // CHECK-LABEL: extern fun correction_b_equal_count
 // CHECK: tensor.map_reduce
-extern fun correction_b_equal_count(input: «2, 2; math.F32»)
-    : [Bool, «2; math.F32», «2; math.F32»] =
+extern fun correction_b_equal_count(input: (tensor.Tensor 2 (2, 2) math.F32))
+    : [Bool, (tensor.Tensor 1 2 math.F32), (tensor.Tensor 1 2 math.F32)] =
     return (torch.reduction.var_mean_dims (torch.resolve_floating math.F32)
         @(2, 1, (2, 2)) ((1I64,), 0x40000000:math.F32) input);
 
 // CHECK-DAG: math.arith.div {{.*}}0:(math.F (23, 8))
 // CHECK-LABEL: extern fun correction_c_greater_than_count
 // CHECK: tensor.map_reduce
-extern fun correction_c_greater_than_count(input: «2, 2; math.F32»)
-    : [Bool, «2; math.F32», «2; math.F32»] =
+extern fun correction_c_greater_than_count(input: (tensor.Tensor 2 (2, 2) math.F32))
+    : [Bool, (tensor.Tensor 1 2 math.F32), (tensor.Tensor 1 2 math.F32)] =
     return (torch.reduction.var_mean_dims (torch.resolve_floating math.F32)
         @(2, 1, (2, 2)) ((1I64,), 0x40400000:math.F32) input);
 
 // CHECK-DAG: math.arith.div {{.*}}1069547520:(math.F (23, 8))
 // CHECK-LABEL: extern fun correction_d_fractional
 // CHECK: tensor.map_reduce
-extern fun correction_d_fractional(input: «2, 2; math.F32»)
-    : [Bool, «2; math.F32», «2; math.F32»] =
+extern fun correction_d_fractional(input: (tensor.Tensor 2 (2, 2) math.F32))
+    : [Bool, (tensor.Tensor 1 2 math.F32), (tensor.Tensor 1 2 math.F32)] =
     return (torch.reduction.var_mean_dims (torch.resolve_floating math.F32)
         @(2, 1, (2, 2)) ((1I64,), 0x3F000000:math.F32) input);
 

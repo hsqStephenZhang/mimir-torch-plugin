@@ -38,13 +38,13 @@ let NatFloating: torch.Floating = (
 // CHECK: tensor.map_reduce
 // CHECK-LABEL: extern fun triplet_sum_swap
 // CHECK: tensor.map_reduce
-extern fun triplet_mean(anchor: «3, 5; Nat», positive: «3, 5; Nat»,
-                        negative: «3, 5; Nat»): Nat =
+extern fun triplet_mean(anchor: (tensor.Tensor 2 (3, 5) Nat), positive: (tensor.Tensor 2 (3, 5) Nat),
+                        negative: (tensor.Tensor 2 (3, 5) Nat)): Nat =
     return (torch.loss.triplet_margin_reduced NatFloating
         @(3, 5) (1, 2, 1, ff, 1) (anchor, positive, negative));
 
-extern fun triplet_sum_swap(anchor: «3, 5; Nat», positive: «3, 5; Nat»,
-                            negative: «3, 5; Nat»): Nat =
+extern fun triplet_sum_swap(anchor: (tensor.Tensor 2 (3, 5) Nat), positive: (tensor.Tensor 2 (3, 5) Nat),
+                            negative: (tensor.Tensor 2 (3, 5) Nat)): Nat =
     return (torch.loss.triplet_margin_reduced NatFloating
         @(3, 5) (1, 2, 1, tt, 0) (anchor, positive, negative));
 

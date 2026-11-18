@@ -35,19 +35,19 @@ let NatFloating: torch.Floating = (
 // CHECK-LABEL: extern fun group_norm_affine
 // CHECK: tensor.map_reduce
 extern fun group_norm_affine(
-    input: «2, 8, 3, 5; Nat», weight: «8; Nat», bias: «8; Nat»)
-  : «2, 8, 3, 5; Nat» =
+    input: (tensor.Tensor 4 (2, 8, 3, 5) Nat), weight: (tensor.Tensor 1 8 Nat), bias: (tensor.Tensor 1 8 Nat))
+  : (tensor.Tensor 4 (2, 8, 3, 5) Nat) =
     return (torch.normalization.group_norm NatFloating
         @(4, (2, 8, 3, 5))
-        (input, option.some weight, option.some bias, 4, 1));
+        (input, option.Opt#Some weight, option.Opt#Some bias, 4, 1));
 
 // CHECK-LABEL: extern fun instance_norm_no_affine
 // CHECK: tensor.map_reduce
-extern fun instance_norm_no_affine(input: «2, 8, 3, 5; Nat»)
-  : «2, 8, 3, 5; Nat» =
+extern fun instance_norm_no_affine(input: (tensor.Tensor 4 (2, 8, 3, 5) Nat))
+  : (tensor.Tensor 4 (2, 8, 3, 5) Nat) =
     return (torch.normalization.group_norm NatFloating
         @(4, (2, 8, 3, 5))
-        (input, option.none @«8; Nat», option.none @«8; Nat», 8, 1));
+        (input, (option.Opt@(tensor.Tensor 1 8 Nat))#None, (option.Opt@(tensor.Tensor 1 8 Nat))#None, 8, 1));
 
 extern lam _compile (): compile.Phase =
     compile.phases ff (

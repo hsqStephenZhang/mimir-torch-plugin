@@ -15,10 +15,10 @@ plugin torch;
 plugin tensor;
 plugin compile;
 
-extern fun construction_ops (input: «2, 3; I32»)
-  : [«4, 3; I32», «2, 2; I32»,
-     «2, 2; I32», «2, 3; I32», «2, 3; I32»,
-     «2, 3; I32», «5; I64»] =
+extern fun construction_ops (input: (tensor.Tensor 2 (2, 3) I32))
+  : [(tensor.Tensor 2 (4, 3) I32), (tensor.Tensor 2 (2, 2) I32),
+     (tensor.Tensor 2 (2, 2) I32), (tensor.Tensor 2 (2, 3) I32), (tensor.Tensor 2 (2, 3) I32),
+     (tensor.Tensor 2 (2, 3) I32), (tensor.Tensor 1 5 I64)] =
     return (
         torch.shape.repeat @(I32, 2, (2, 3)) (2, 1) input,
         torch.indexing.narrow @(I32, 2, (2, 3)) (-1I64, -2I64, 2) input,

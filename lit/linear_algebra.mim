@@ -38,9 +38,9 @@ let NatArithmetic: torch.Arithmetic = (
 );
 
 extern fun linear_algebra(
-    lhs: «2, 3; Nat», rhs: «3, 4; Nat»,
-    batch_lhs: «5, 2, 3; Nat», batch_rhs: «5, 3, 4; Nat»)
-  : [«2, 4; Nat», «5, 2, 4; Nat»] =
+    lhs: (tensor.Tensor 2 (2, 3) Nat), rhs: (tensor.Tensor 2 (3, 4) Nat),
+    batch_lhs: (tensor.Tensor 3 (5, 2, 3) Nat), batch_rhs: (tensor.Tensor 3 (5, 3, 4) Nat))
+  : [(tensor.Tensor 2 (2, 4) Nat), (tensor.Tensor 3 (5, 2, 4) Nat)] =
     return (
         torch.linalg.mm NatArithmetic (lhs, rhs),
         torch.linalg.bmm NatArithmetic (batch_lhs, batch_rhs));
@@ -48,34 +48,34 @@ extern fun linear_algebra(
 // Static batch extents let PE fold `5 * 6`, both reshape shapes, and every
 // rank-derived value before the residual batched product is emitted.
 extern fun batched_matmul_static(
-    lhs: «5, 6, 2, 3; Nat», rhs: «5, 6, 3, 4; Nat»)
-  : «5, 6, 2, 4; Nat» =
+    lhs: (tensor.Tensor 4 (5, 6, 2, 3) Nat), rhs: (tensor.Tensor 4 (5, 6, 3, 4) Nat))
+  : (tensor.Tensor 4 (5, 6, 2, 4) Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(4, 4, (5, 6, 2, 3), (5, 6, 3, 4)) (lhs, rhs));
 
 // Matching symbolic batch extents prove compatibility, so PE removes the
 // runtime check while preserving the batch-size arithmetic.
 extern fun batched_matmul_dynamic {b0 b1: Nat} (
-    lhs: «b0, b1, 2, 3; Nat», rhs: «b0, b1, 3, 4; Nat»)
-  : «b0, b1, 2, 4; Nat» =
+    lhs: (tensor.Tensor 4 (b0, b1, 2, 3) Nat), rhs: (tensor.Tensor 4 (b0, b1, 3, 4) Nat))
+  : (tensor.Tensor 4 (b0, b1, 2, 4) Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(4, 4, (b0, b1, 2, 3), (b0, b1, 3, 4)) (lhs, rhs));
 
-extern fun vector_vector(lhs: «3; Nat», rhs: «3; Nat»): «(); Nat» =
+extern fun vector_vector(lhs: (tensor.Tensor 1 3 Nat), rhs: (tensor.Tensor 1 3 Nat)): (tensor.Tensor 0 () Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(1, 1, (3,), (3,)) (lhs, rhs));
 
-extern fun matrix_vector(lhs: «2, 3; Nat», rhs: «3; Nat»): «2; Nat» =
+extern fun matrix_vector(lhs: (tensor.Tensor 2 (2, 3) Nat), rhs: (tensor.Tensor 1 3 Nat)): (tensor.Tensor 1 2 Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(2, 1, (2, 3), (3,)) (lhs, rhs));
 
 // A missing RHS batch axis is statically one. Keep this frontend-relevant case
 // explicit so dependent output-shape normalization cannot retain the branch.
-extern fun tensor_matrix(lhs: «2, 3, 5; Nat», rhs: «5, 7; Nat»): «2, 3, 7; Nat» =
+extern fun tensor_matrix(lhs: (tensor.Tensor 3 (2, 3, 5) Nat), rhs: (tensor.Tensor 2 (5, 7) Nat)): (tensor.Tensor 3 (2, 3, 7) Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(3, 2, (2, 3, 5), (5, 7)) (lhs, rhs));
 
-extern fun vector_matrix(lhs: «3; Nat», rhs: «3, 4; Nat»): «4; Nat» =
+extern fun vector_matrix(lhs: (tensor.Tensor 1 3 Nat), rhs: (tensor.Tensor 2 (3, 4) Nat)): (tensor.Tensor 1 4 Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(1, 2, (3,), (3, 4)) (lhs, rhs));
 

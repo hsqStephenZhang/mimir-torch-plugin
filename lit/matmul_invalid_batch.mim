@@ -1,6 +1,7 @@
 // RUN: (! %mim %s -o /dev/null 2>&1) | %FileCheck %s
 
 plugin core;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -21,8 +22,8 @@ let NatArithmetic: torch.Arithmetic = (
 );
 
 extern fun invalid_batch(
-    lhs: «2, 3, 4, 5; Nat», rhs: «7, 3, 5, 6; Nat»)
-  : «7, 3, 4, 6; Nat» =
+    lhs: (tensor.Tensor 4 (2, 3, 4, 5) Nat), rhs: (tensor.Tensor 4 (7, 3, 5, 6) Nat))
+  : (tensor.Tensor 4 (7, 3, 4, 6) Nat) =
     return (torch.linalg.matmul NatArithmetic
         @(4, 4, (2, 3, 4, 5), (7, 3, 5, 6)) (lhs, rhs));
 

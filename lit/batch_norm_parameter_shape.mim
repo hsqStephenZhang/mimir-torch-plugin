@@ -4,17 +4,18 @@
 
 plugin math;
 plugin option;
+plugin tensor;
 plugin torch;
 plugin compile;
 
 extern fun wrong_weight_shape(
-    input: «2, 3, 4; math.F32»,
-    mean variance: «3; math.F32»,
-    weight: «4; math.F32»): «2, 3, 4; math.F32» =
+    input: (tensor.Tensor 3 (2, 3, 4) math.F32),
+    mean variance: (tensor.Tensor 1 3 math.F32),
+    weight: (tensor.Tensor 1 4 math.F32)): (tensor.Tensor 3 (2, 3, 4) math.F32) =
     return (torch.normalization.batch_norm
         (torch.resolve_floating math.F32) @(3, (2, 3, 4))
-        (input, option.some weight, option.none @«3; math.F32»,
-         option.some mean, option.some variance)
+        (input, option.Opt#Some weight, (option.Opt@(tensor.Tensor 1 3 math.F32))#None,
+         option.Opt#Some mean, option.Opt#Some variance)
         (ff, 0x3DCCCCCD:math.F32, 0x3727C5AC:math.F32, ff));
 
 extern lam _compile (): compile.Phase = torch.lower_torch;

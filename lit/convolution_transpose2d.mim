@@ -25,13 +25,13 @@ let NatArithmetic: torch.Arithmetic = (
 // CHECK-LABEL: extern fun convolution_transpose2d
 // CHECK: tensor.map_reduce
 extern fun convolution_transpose2d(
-    input: «1, 4, 3, 4; Nat»,
-    weight: «4, 3, 3, 2; Nat»,
-    bias: «6; Nat»): «1, 6, 6, 14; Nat» =
+    input: (tensor.Tensor 4 (1, 4, 3, 4) Nat),
+    weight: (tensor.Tensor 4 (4, 3, 3, 2) Nat),
+    bias: (tensor.Tensor 1 6 Nat)): (tensor.Tensor 4 (1, 6, 6, 14) Nat) =
     return (torch.conv.transpose2d NatArithmetic
         @(1, 4, 6, 3, 3, 4, 3, 2)
         ((2, 3), (1, 0), (1, 2), (1, 2), 2)
-        (input, weight, option.some bias));
+        (input, weight, option.Opt#Some bias));
 
 extern lam _compile (): compile.Phase =
     compile.phases ff (

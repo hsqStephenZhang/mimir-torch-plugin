@@ -24,10 +24,10 @@ let NatArithmetic: torch.Arithmetic = (
 
 // PyTorch defines these as `lhs +/- alpha * rhs`. The alpha argument must
 // remain visible at the Torch boundary and specialize into the scalar lambda.
-extern fun add_alpha(lhs rhs: «2; Nat»): «2; Nat» =
+extern fun add_alpha(lhs rhs: (tensor.Tensor 1 2 Nat)): (tensor.Tensor 1 2 Nat) =
     return (torch.binary.add NatArithmetic @(1, (2,)) (lhs, rhs, 3));
 
-extern fun sub_alpha(lhs rhs: «2; Nat»): «2; Nat» =
+extern fun sub_alpha(lhs rhs: (tensor.Tensor 1 2 Nat)): (tensor.Tensor 1 2 Nat) =
     return (torch.binary.sub NatArithmetic @(1, (2,)) (lhs, rhs, 4));
 
 // CHECK-DAG: core.nat.mul

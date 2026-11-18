@@ -2,6 +2,7 @@
 
 plugin core;
 plugin option;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -31,10 +32,10 @@ let NatFloating: torch.Floating = (
     core.nat.mul,
 );
 
-extern fun invalid_groups(input: «2, 8, 3, 5; Nat»): «2, 8, 3, 5; Nat» =
+extern fun invalid_groups(input: (tensor.Tensor 4 (2, 8, 3, 5) Nat)): (tensor.Tensor 4 (2, 8, 3, 5) Nat) =
     return (torch.normalization.group_norm NatFloating
         @(4, (2, 8, 3, 5))
-        (input, option.none @«8; Nat», option.none @«8; Nat», 3, 1));
+        (input, (option.Opt@(tensor.Tensor 1 8 Nat))#None, (option.Opt@(tensor.Tensor 1 8 Nat))#None, 3, 1));
 
 // CHECK: group_norm expects channels divisible by groups
 extern lam _compile (): compile.Phase = torch.lower_torch;

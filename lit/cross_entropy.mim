@@ -35,7 +35,7 @@ let NatFloating: torch.Floating = (
 // CHECK-LABEL: extern fun cross_entropy
 // CHECK: tensor.gather
 // CHECK: tensor.map_reduce
-extern fun cross_entropy(input: «2, 4; Nat», target: «2; I64»): Nat =
+extern fun cross_entropy(input: (tensor.Tensor 2 (2, 4) Nat), target: (tensor.Tensor 1 2 I64)): Nat =
     return (torch.loss.cross_entropy_mean_2d NatFloating
         @(2, 4) (input, target));
 

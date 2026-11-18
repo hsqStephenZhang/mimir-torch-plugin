@@ -29,52 +29,52 @@ let NatArithmetic: torch.Arithmetic = (
 );
 
 // CHECK-DAG: extern fun generic_mean
-extern fun generic_mean(input: «2, 3, 4; math.F32»): «2, 1, 4; math.F32» =
+extern fun generic_mean(input: (tensor.Tensor 3 (2, 3, 4) math.F32)): (tensor.Tensor 3 (2, 1, 4) math.F32) =
     return (torch.reduction.mean (torch.resolve_floating math.F32)
         @(3, 1, (2, 3, 4)) ((1I64,), tt) input);
 
 // CHECK-DAG: extern fun generic_amax
-extern fun generic_amax(input: «2, 3, 4; math.F32»): «3; math.F32» =
+extern fun generic_amax(input: (tensor.Tensor 3 (2, 3, 4) math.F32)): (tensor.Tensor 1 3 math.F32) =
     return (torch.reduction.amax (torch.resolve_floating math.F32)
         @(3, 2, (2, 3, 4)) ((0I64, 2I64), ff) input);
 
 // CHECK-DAG: extern fun amax_all
-extern fun amax_all(input: «8; math.F32»): math.F32 =
+extern fun amax_all(input: (tensor.Tensor 1 8 math.F32)): math.F32 =
     return (torch.reduction.amax_all (torch.resolve_floating math.F32)
         @(1, (8,)) input);
 
 // CHECK-DAG: extern fun generic_norm_p2
-extern fun generic_norm_p2(input: «2, 3, 4; math.F32»): «2, 4; math.F32» =
+extern fun generic_norm_p2(input: (tensor.Tensor 3 (2, 3, 4) math.F32)): (tensor.Tensor 2 (2, 4) math.F32) =
     return (torch.reduction.vector_norm (torch.resolve_floating math.F32)
         @(3, 1, (2, 3, 4))
         ((1I64,), ff, 0x40000000:math.F32) input);
 
 // CHECK-DAG: extern fun generic_norm_p0
-extern fun generic_norm_p0(input: «2, 3, 4; math.F32»): «2, 1, 4; math.F32» =
+extern fun generic_norm_p0(input: (tensor.Tensor 3 (2, 3, 4) math.F32)): (tensor.Tensor 3 (2, 1, 4) math.F32) =
     return (torch.reduction.vector_norm (torch.resolve_floating math.F32)
         @(3, 1, (2, 3, 4))
         ((1I64,), tt, 0x00000000:math.F32) input);
 
 // CHECK-DAG: extern fun generic_logsumexp
-extern fun generic_logsumexp(input: «2, 3, 4; math.F32»): «2, 1, 4; math.F32» =
+extern fun generic_logsumexp(input: (tensor.Tensor 3 (2, 3, 4) math.F32)): (tensor.Tensor 3 (2, 1, 4) math.F32) =
     return (torch.reduction.logsumexp (torch.resolve_floating math.F32)
         @(3, 1, (2, 3, 4)) ((-2I64,), tt) input);
 
 // CHECK-DAG: extern fun generic_var_mean
-extern fun generic_var_mean(input: «2, 3, 4; math.F32»)
-    : [Bool, «2, 1, 4; math.F32», «2, 1, 4; math.F32»] =
+extern fun generic_var_mean(input: (tensor.Tensor 3 (2, 3, 4) math.F32))
+    : [Bool, (tensor.Tensor 3 (2, 1, 4) math.F32), (tensor.Tensor 3 (2, 1, 4) math.F32)] =
     return (torch.reduction.var_mean (torch.resolve_floating math.F32)
         @(3, 1, (2, 3, 4))
         ((1I64,), 0x3F800000:math.F32, tt) input);
 
-extern fun sum_remove_dims(input: «2, 3, 4; Nat»): «3; Nat» =
+extern fun sum_remove_dims(input: (tensor.Tensor 3 (2, 3, 4) Nat)): (tensor.Tensor 1 3 Nat) =
     return (torch.reduction.sum NatArithmetic
         @(3, 2, (2, 3, 4)) ((0I64, -1I64), ff) input);
 
 // Definitions are emitted in reverse source order.
 // CHECK-LABEL: extern fun sum_keep_dims
 // CHECK: tensor.map_reduce
-extern fun sum_keep_dims(input: «2, 3, 4; Nat»): «1, 3, 1; Nat» =
+extern fun sum_keep_dims(input: (tensor.Tensor 3 (2, 3, 4) Nat)): (tensor.Tensor 3 (1, 3, 1) Nat) =
     return (torch.reduction.sum NatArithmetic
         @(3, 2, (2, 3, 4)) ((0I64, -1I64), tt) input);
 
@@ -82,19 +82,19 @@ extern fun sum_keep_dims(input: «2, 3, 4; Nat»): «1, 3, 1; Nat» =
 // CHECK: tensor.map_reduce
 
 // Mixed dtype policy is selected by exact flat-type lookup and disappears.
-extern fun sum_i64_default(input: «2, 3; I64»): «2; I64» =
+extern fun sum_i64_default(input: (tensor.Tensor 2 (2, 3) I64)): (tensor.Tensor 1 2 I64) =
     return (torch.reduction.sum_typed
         (torch.resolve_reduction I64 I64)
         @(2, 1, (2, 3)) ((1I64,), ff) input);
 
 // PyTorch promotes Bool sum results to I64.
-extern fun sum_bool_default(input: «2, 3; Bool»): «2; I64» =
+extern fun sum_bool_default(input: (tensor.Tensor 2 (2, 3) Bool)): (tensor.Tensor 1 2 I64) =
     return (torch.reduction.sum_typed
         (torch.resolve_reduction Bool I64)
         @(2, 1, (2, 3)) ((1I64,), ff) input);
 
 // Explicit dtype performs conversion before accumulation.
-extern fun sum_i64_f32(input: «2, 3; I64»): «2; math.F32» =
+extern fun sum_i64_f32(input: (tensor.Tensor 2 (2, 3) I64)): (tensor.Tensor 1 2 math.F32) =
     return (torch.reduction.sum_typed
         (torch.resolve_reduction I64 math.F32)
         @(2, 1, (2, 3)) ((1I64,), ff) input);

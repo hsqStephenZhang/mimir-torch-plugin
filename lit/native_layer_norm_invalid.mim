@@ -2,6 +2,7 @@
 
 plugin core;
 plugin option;
+plugin tensor;
 plugin torch;
 plugin compile;
 
@@ -31,11 +32,11 @@ let NatFloating: torch.Floating = (
     core.nat.mul,
 );
 
-extern fun invalid_layer_norm(input: «2; Nat»)
-  : [«2; Nat», «2; Nat», «2; Nat»] =
+extern fun invalid_layer_norm(input: (tensor.Tensor 1 2 Nat))
+  : [(tensor.Tensor 1 2 Nat), (tensor.Tensor 1 2 Nat), (tensor.Tensor 1 2 Nat)] =
     return (torch.normalization.native_layer_norm NatFloating
         @(1, 0) ((2,), ()) input
-        ((option.none @«(); Nat»), (option.none @«(); Nat»)) 1);
+        (((option.Opt@(tensor.Tensor 0 () Nat))#None), ((option.Opt@(tensor.Tensor 0 () Nat))#None)) 1);
 
 // CHECK: native_layer_norm expects a non-empty normalized_shape
 extern lam _compile (): compile.Phase = torch.lower_torch;

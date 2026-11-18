@@ -40,15 +40,15 @@ let NatFloating: torch.Floating = (
 // CHECK: tensor.map_reduce
 // CHECK-LABEL: extern fun kl_sum
 // CHECK: tensor.map_reduce
-extern fun kl_sum(input: «2, 3; Nat», target: «2, 3; Nat»): Nat =
+extern fun kl_sum(input: (tensor.Tensor 2 (2, 3) Nat), target: (tensor.Tensor 2 (2, 3) Nat)): Nat =
     return (torch.loss.kl_div_reduced NatFloating
         @(2, (2, 3)) (ff, 0) (input, target));
 
-extern fun kl_mean_log_target(input: «2, 3; Nat», target: «2, 3; Nat»): Nat =
+extern fun kl_mean_log_target(input: (tensor.Tensor 2 (2, 3) Nat), target: (tensor.Tensor 2 (2, 3) Nat)): Nat =
     return (torch.loss.kl_div_reduced NatFloating
         @(2, (2, 3)) (tt, 1) (input, target));
 
-extern fun kl_batchmean(input: «2, 3; Nat», target: «2, 3; Nat»): Nat =
+extern fun kl_batchmean(input: (tensor.Tensor 2 (2, 3) Nat), target: (tensor.Tensor 2 (2, 3) Nat)): Nat =
     return (torch.loss.kl_div_reduced NatFloating
         @(2, (2, 3)) (ff, 2) (input, target));
 

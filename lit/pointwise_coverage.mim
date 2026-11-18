@@ -10,7 +10,7 @@ plugin compile;
 // implicit checks verify that all framework operations decompose completely.
 // CHECK-DAG: extern fun floating_pointwise
 // CHECK-DAG: tensor.map_reduce
-extern fun floating_pointwise(lhs rhs: «2, 3; math.F32»): «2, 3; math.F32» =
+extern fun floating_pointwise(lhs rhs: (tensor.Tensor 2 (2, 3) math.F32)): (tensor.Tensor 2 (2, 3) math.F32) =
     let F = torch.resolve_floating math.F32;
     let A = torch.resolve_arithmetic math.F32;
     let x0 = torch.binary.mul A @(2, (2, 3)) (lhs, rhs);
@@ -36,7 +36,7 @@ extern fun floating_pointwise(lhs rhs: «2, 3; math.F32»): «2, 3; math.F32» =
 
 // CHECK-DAG: extern fun floating_comparisons
 // CHECK-DAG: tensor.map_reduce
-extern fun floating_comparisons(lhs rhs: «2, 3; math.F32»): «2, 3; math.F32» =
+extern fun floating_comparisons(lhs rhs: (tensor.Tensor 2 (2, 3) math.F32)): (tensor.Tensor 2 (2, 3) math.F32) =
     let A = torch.resolve_arithmetic math.F32;
     let c0 = torch.comparison.eq A @(2, (2, 3)) (lhs, rhs);
     let x0 = torch.pointwise.where_ @(math.F32, 2, (2, 3)) (c0, lhs, rhs);
@@ -53,7 +53,7 @@ extern fun floating_comparisons(lhs rhs: «2, 3; math.F32»): «2, 3; math.F32»
 
 // CHECK-DAG: extern fun i64_pointwise
 // CHECK-DAG: tensor.map_reduce
-extern fun i64_pointwise(lhs rhs: «2, 3; I64»): «2, 3; I64» =
+extern fun i64_pointwise(lhs rhs: (tensor.Tensor 2 (2, 3) I64)): (tensor.Tensor 2 (2, 3) I64) =
     let x0 = torch.binary.add_i64_scalar @(2, (2, 3)) (lhs, 2I64, 3I64);
     let c0 = torch.comparison.eq_i64_scalar @(2, (2, 3)) (x0, 0I64);
     let x1 = torch.pointwise.where_ @(I64, 2, (2, 3)) (c0, x0, rhs);

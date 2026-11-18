@@ -11,8 +11,8 @@ plugin torch;
 plugin compile;
 
 extern fun addcmul_dynamic {a n m: Nat}(
-    self: «a; math.F32», tensor1: «m; math.F32»,
-    tensor2: «n, m; math.F32»): «n, m; math.F32» =
+    self: (tensor.Tensor 1 a math.F32), tensor1: (tensor.Tensor 1 m math.F32),
+    tensor2: (tensor.Tensor 2 (n, m) math.F32)): (tensor.Tensor 2 (n, m) math.F32) =
     return (torch.binary.addcmul (torch.resolve_arithmetic math.F32)
         @(1, 1, 2, 2)
         ((a,), (0₂,),

@@ -9,7 +9,7 @@ plugin torch;
 plugin tensor;
 plugin compile;
 
-extern fun slice_identity(input: «2, 3; I32»): «2, 3; I32» =
+extern fun slice_identity(input: (tensor.Tensor 2 (2, 3) I32)): (tensor.Tensor 2 (2, 3) I32) =
     return (torch.indexing.slice @(I32, 2)
         ((2, 3), (0, 0), (1, 1), (2, 3)) input);
 

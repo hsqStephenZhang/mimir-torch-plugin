@@ -11,11 +11,11 @@ plugin math;
 plugin torch;
 plugin compile;
 
-extern fun maximum_f32(lhs rhs: «2; math.F32»): «2; math.F32» =
+extern fun maximum_f32(lhs rhs: (tensor.Tensor 1 2 math.F32)): (tensor.Tensor 1 2 math.F32) =
     return (torch.binary.maximum (torch.resolve_arithmetic math.F32)
         @(1, 2) (lhs, rhs));
 
-extern fun minimum_f64(lhs rhs: «2; math.F64»): «2; math.F64» =
+extern fun minimum_f64(lhs rhs: (tensor.Tensor 1 2 math.F64)): (tensor.Tensor 1 2 math.F64) =
     return (torch.binary.minimum (torch.resolve_arithmetic math.F64)
         @(1, 2) (lhs, rhs));
 

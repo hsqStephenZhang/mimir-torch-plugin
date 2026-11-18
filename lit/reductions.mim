@@ -38,11 +38,11 @@ let NatFloating: torch.Floating = (
     core.nat.mul,
 );
 
-extern fun reductions(input: «2, 3, 4; Nat»): «2, 4; Nat» =
+extern fun reductions(input: (tensor.Tensor 3 (2, 3, 4) Nat)): (tensor.Tensor 2 (2, 4) Nat) =
     return (torch.reduction.sum_dim NatArithmetic
         @(3, (2, 3, 4)) (-2I64) input);
 
-extern fun mean_all(input: «17, 19; Nat»): Nat =
+extern fun mean_all(input: (tensor.Tensor 2 (17, 19) Nat)): Nat =
     return (torch.reduction.mean_all NatFloating
         @(2, (17, 19)) input);
 

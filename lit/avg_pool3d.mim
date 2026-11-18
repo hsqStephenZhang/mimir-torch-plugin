@@ -12,11 +12,11 @@ plugin compile;
 // CHECK: tensor.map_reduce_post
 // CHECK: tensor.map_reduce_post
 // CHECK-SAME: tensor.generate
-extern fun avg_pool3d(input: «2, 3, 5, 7, 9; math.F32»)
-                    : «2, 3, 3, 4, 5; math.F32» =
+extern fun avg_pool3d(input: (tensor.Tensor 5 (2, 3, 5, 7, 9) math.F32))
+                    : (tensor.Tensor 5 (2, 3, 3, 4, 5) math.F32) =
     return (torch.pool.avg_pool3d (torch.resolve_floating math.F32)
         @(2, 3, 5, 7, 9)
-        ((3, 3, 3), (2, 2, 2), (1, 1, 1), tt, ff, option.none @Nat)
+        ((3, 3, 3), (2, 2, 2), (1, 1, 1), tt, ff, (option.Opt@Nat)#None)
         input);
 
 extern lam _compile (): compile.Phase =
