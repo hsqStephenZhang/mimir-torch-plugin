@@ -1898,9 +1898,9 @@ pub lam torch_softmax_common (F: Floating)
         lam body(): (tensor.Tensor r s F#A#R#T) =
             let dim = torch_canonical_dim @r dimension;
             let has_zero_dim = torch_numel s == 0;
-            let shifted = (core.select (has_zero_dim, empty, stabilized)) ()
+            // A value, not a branch: with an undecided element count the select stays, and an empty tensor's loops do not run.
+            let shifted = core.select @(tensor.Tensor r s F#A#R#T) (has_zero_dim, input, stabilized ())
             where
-                lam empty(): (tensor.Tensor r s F#A#R#T) = input;
                 lam stabilized(): (tensor.Tensor r s F#A#R#T) =
                     let maximum = torch_reduce_dim (F#A#maximum, F#neg_inf) (s, dim) input;
                     let maximum_b = torch_broadcast_reduced @(F#A#R#T, r) (s, dim) maximum;
